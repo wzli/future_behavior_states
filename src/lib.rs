@@ -1,12 +1,11 @@
-
+use futures_lite::{future, FutureExt};
 use std::any::{Any, TypeId};
 use std::cell::Cell;
 use std::fmt::Debug;
-use std::future::{Future, pending};
+use std::future::{pending, Future};
 use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll};
-use futures_lite::{future, FutureExt};
 use tracing::instrument;
 
 // macros
@@ -140,16 +139,16 @@ async fn ToResult(f: impl Future<Output = bool>) -> Result<(), ()> {
 pub async fn TransitionOnResult(
     f: impl Future<Output = bool>,
     state: Option<State>,
-    success: bool,
-    failure: bool,
+    on_success: bool,
+    on_failure: bool,
 ) -> State {
-        let result = f.await;
-        if (result && success) || (!result && failure) {
-            if let Some(state) = state {
-                return state;
-            }
+    let result = f.await;
+    if (result && on_success) || (!result && on_failure) {
+        if let Some(state) = state {
+            return state;
         }
-        pending().await
+    }
+    pending().await
 }
 
 #[instrument(skip(wm))]
@@ -167,7 +166,8 @@ pub async fn state_c(wm: impl WorldModel) -> State {
     select!(
         TransitionOnResult(True(), Some(Success().into()), true, true),
         TransitionOnResult(False(), None, true, true)
-    ).await
+    )
+    .await
 }
 
 // choose a tune to hum
@@ -330,7 +330,6 @@ mod tests {
     async fn test_root() -> bool {
         any!(True(), False(), False()).await
     }
-
 
     async fn choose_tune2() -> bool {
         //try_zip!(True(), True()).await
