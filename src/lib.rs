@@ -8,6 +8,8 @@ use std::rc::Rc;
 use std::task::{Context, Poll};
 use tracing::instrument;
 
+use std::cell::OnceCell;
+
 // macros
 
 macro_rules! select {
@@ -28,7 +30,7 @@ pub(crate) use join;
 
 macro_rules! all {
     ($num:expr, $($tail:tt)*) => {
-        ToBool(future::try_zip(ToResult($num), ToResult(all!($($tail)*))))
+        future::try_zip(ToResult($num), all!($($tail)*).map(ToResult)).map(ToBool)
     };
     ($num:expr) => { $num };
 }
@@ -36,7 +38,7 @@ pub(crate) use all;
 
 macro_rules! any {
     ($num:expr, $($tail:tt)*) => {
-        Not(ToBool(future::try_zip(ToResult(Not($num)), ToResult(any!($($tail)*)))))
+        future::try_zip(ToResult(Not($num)), any!($($tail)*).map(ToResult)).map(ToBool).map(Not)
     };
     ($num:expr) => { $num };
 }
@@ -45,12 +47,19 @@ pub(crate) use any;
 // traits
 trait WorldModel: Any + Clone + Debug {}
 
-trait FutureState: Future<Output = State> + Any {}
+pub trait FutureState: Future<Output = State> + Any {}
+impl<F: Future<Output = State> + Any> FutureState for F {}
+
+pub trait Map: Sized {
+    fn map<O, F: FnOnce(Self) -> O>(self, f: F) -> O {
+        f(self)
+    }
+}
+impl<T, F: Future<Output = T>> Map for F {}
 
 struct State(Pin<Box<dyn FutureState>>);
 
 // trait implementations
-impl<F: Future<Output = State> + Any> FutureState for F {}
 
 impl PartialEq for dyn FutureState {
     fn eq(&self, other: &Self) -> bool {
@@ -138,9 +147,9 @@ pub async fn TransitionOnResult(
     on_success: bool,
     on_failure: bool,
 ) -> State {
-    let result = f.await;
-    if (result && on_success) || (!result && on_failure) {
-        if let Some(state) = state {
+    if let Some(state) = state {
+        let result = f.await;
+        if (result && on_success) || (!result && on_failure) {
             return state;
         }
     }
