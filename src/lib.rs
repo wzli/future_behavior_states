@@ -210,13 +210,6 @@ impl InnerWorldModel {
         self.handle_enemy().await || self.chill_on_grass().await || self.choose_tune().await
     }
 
-    // pub fn test_member()
-    pub fn count_to_3<T>(&self) -> impl Fn() + '_ {
-        || {
-            self.count_to_3::<T>();
-        }
-    }
-
     // choose a tune to hum
     pub async fn choose_tune(&self) -> bool {
         future::or(self.hum_a_tune(2), self.hum_a_tune(1)).await
