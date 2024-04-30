@@ -31,24 +31,39 @@ macro_rules! join {
 
 #[macro_export]
 macro_rules! any {
-    ($head:expr, $($tail:tt)*) => {
-        future::try_zip(to_result(not($head)), any!($($tail)*).map(to_result)).map(to_bool).map(not)
+    ($($args:tt)*) => {
+        recursive_try_zip!(true, $($args)*).map(to_bool).map(not)
     };
-    ($head:expr) => { $head };
 }
 
 #[macro_export]
 macro_rules! all {
     ($($args:tt)*) => {
-        all_inner!($($args)*).map(to_bool)
+        recursive_try_zip!(false, $($args)*).map(to_bool)
     };
 }
 
-macro_rules! all_inner {
-    ($head:expr, $($tail:tt)*) => {
-        future::try_zip(to_result($head), all_inner!($($tail)*))
+macro_rules! recursive_try_zip {
+    ($inv:expr, $head:expr, $($tail:tt)*) => {
+        future::try_zip(to_result::<$inv>($head), recursive_try_zip!($inv, $($tail)*))
     };
-    ($head:expr) => { to_result($head) };
+    ($inv:expr, $head:expr) => { to_result::<$inv>($head) };
+}
+
+#[macro_export]
+macro_rules! repeat_until {
+    ($f:expr, $until:expr) => {{
+        while $f.await ^ $until {}
+        true
+    }};
+    ($f:expr, $until:expr; $n:expr) => {
+        for _ in 0..$n {
+            if $f.await ^ !$until {
+                return true;
+            }
+        }
+        false
+    };
 }
 
 // traits
@@ -117,8 +132,8 @@ pub async fn not(f: impl Future<Output = bool>) -> bool {
 // TODO: this needs to be macro to avoid requirement for copy
 /*
 #[instrument(skip(f))]
-pub async fn RunUntil(f: impl Future<Output = bool>, terminate_on: bool, result: bool) -> bool {
-    while f.await != terminate_on {};
+pub async fn RunUntil(f: impl Future<Output = bool>, until: bool, result: bool) -> bool {
+    while f.await != until {};
     result
 }
 */
@@ -127,8 +142,8 @@ pub async fn to_bool<T, E>(f: impl Future<Output = Result<T, E>>) -> bool {
     f.await.is_ok()
 }
 
-pub async fn to_result(f: impl Future<Output = bool>) -> Result<(), ()> {
-    if f.await {
+pub async fn to_result<const INV: bool>(f: impl Future<Output = bool>) -> Result<(), ()> {
+    if f.await ^ INV {
         Ok(())
     } else {
         Err(())
@@ -303,6 +318,7 @@ impl InnerWorldModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_lite::future::block_on;
 
     fn test_init() {
         let _ = tracing_subscriber::fmt()
@@ -331,8 +347,49 @@ mod tests {
     }
 
     #[test]
-    fn try_zip() {
+    fn any_macro() {
         test_init();
+        async fn root(a: bool, b: bool) -> bool {
+            any!(ready(a), ready(b)).await
+        }
+        assert!(!block_on(root(false, false)));
+        assert!(block_on(root(false, true)));
+        assert!(block_on(root(true, false)));
+        assert!(block_on(root(true, true)));
+    }
+
+    #[test]
+    fn all_macro() {
+        test_init();
+        async fn root(a: bool, b: bool) -> bool {
+            all!(ready(a), ready(b)).await
+        }
+        assert!(!block_on(root(false, false)));
+        assert!(!block_on(root(false, true)));
+        assert!(!block_on(root(true, false)));
+        assert!(block_on(root(true, true)));
+    }
+
+    #[test]
+    fn run_until_macro() {
+        test_init();
+        let mut x = 3;
+
+        async fn count_down(x: &mut u8) -> bool {
+            if *x == 0 {
+                true
+            } else {
+                *x -= 1;
+                false
+            }
+        }
+
+        async fn root(x: &mut u8) -> bool {
+            repeat_until!(count_down(x), true)
+        }
+
+        assert!(block_on(root(&mut x)));
+        assert_eq!(x, 0);
     }
 
     #[test]
@@ -351,7 +408,7 @@ mod tests {
             hummed: 0.into(),
         };
 
-        assert!(futures_lite::future::block_on(ctx.root()));
+        assert!(block_on(ctx.root()));
         dbg!(ctx);
     }
 }
