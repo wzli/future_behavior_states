@@ -136,11 +136,10 @@ pub async fn transition_on_result(
         if (result && on_success) || (!result && on_failure) {
             tracing::event!(
                 tracing::Level::INFO,
-                "{}",
-                match state {
+                state = match state {
                     State::Success => "Success",
-                    State::Success => "Failure",
-                    _ => "Next State",
+                    State::Failure => "Failure",
+                    _ => "Next",
                 }
             );
             return state;
