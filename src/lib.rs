@@ -2,7 +2,7 @@ use futures_lite::{future, FutureExt};
 use std::any::{Any, TypeId};
 use std::cell::Cell;
 use std::fmt::Debug;
-use std::future::{pending, Future};
+use std::future::{pending, ready, Future};
 use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll};
@@ -30,7 +30,7 @@ pub(crate) use join;
 
 macro_rules! all {
     ($num:expr, $($tail:tt)*) => {
-        future::try_zip(ToResult($num), all!($($tail)*).map(ToResult)).map(ToBool)
+        future::try_zip(to_result($num), all!($($tail)*).map(to_result)).map(to_bool)
     };
     ($num:expr) => { $num };
 }
@@ -38,15 +38,13 @@ pub(crate) use all;
 
 macro_rules! any {
     ($num:expr, $($tail:tt)*) => {
-        future::try_zip(ToResult(Not($num)), any!($($tail)*).map(ToResult)).map(ToBool).map(Not)
+        future::try_zip(to_result(not($num)), any!($($tail)*).map(to_result)).map(to_bool).map(not)
     };
     ($num:expr) => { $num };
 }
 pub(crate) use any;
 
 // traits
-trait WorldModel: Any + Clone + Debug {}
-
 pub trait FutureState: Future<Output = State> + Any {}
 impl<F: Future<Output = State> + Any> FutureState for F {}
 
@@ -77,9 +75,9 @@ impl Future for State {
     type Output = bool;
     fn poll(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
         if let Poll::Ready(next_state) = self.0.poll(ctx) {
-            if self.0 == State::from(Success()).0 {
+            if self.0 == State::from(success()).0 {
                 Poll::Ready(true)
-            } else if self.0 == State::from(Failure()).0 {
+            } else if self.0 == State::from(failure()).0 {
                 Poll::Ready(false)
             } else {
                 *self = next_state;
@@ -95,27 +93,17 @@ impl Future for State {
 // helpers
 
 #[instrument]
-pub async fn True() -> bool {
-    true
+pub async fn success() -> State {
+    success().into()
 }
 
 #[instrument]
-pub async fn False() -> bool {
-    false
-}
-
-#[instrument]
-pub async fn Success() -> State {
-    Success().into()
-}
-
-#[instrument]
-pub async fn Failure() -> State {
-    Failure().into()
+pub async fn failure() -> State {
+    failure().into()
 }
 
 #[instrument(skip(f))]
-pub async fn Not(f: impl Future<Output = bool>) -> bool {
+pub async fn not(f: impl Future<Output = bool>) -> bool {
     !f.await
 }
 
@@ -128,11 +116,11 @@ pub async fn RunUntil(f: impl Future<Output = bool>, terminate_on: bool, result:
 }
 */
 
-async fn ToBool<T, E>(f: impl Future<Output = Result<T, E>>) -> bool {
+async fn to_bool<T, E>(f: impl Future<Output = Result<T, E>>) -> bool {
     f.await.is_ok()
 }
 
-async fn ToResult(f: impl Future<Output = bool>) -> Result<(), ()> {
+async fn to_result(f: impl Future<Output = bool>) -> Result<(), ()> {
     if f.await {
         Ok(())
     } else {
@@ -141,7 +129,7 @@ async fn ToResult(f: impl Future<Output = bool>) -> Result<(), ()> {
 }
 
 #[instrument(skip(f, state))]
-pub async fn TransitionOnResult(
+pub async fn transition_on_result(
     f: impl Future<Output = bool>,
     state: Option<State>,
     on_success: bool,
@@ -169,8 +157,8 @@ pub async fn state_b(wm: impl WorldModel) -> State {
 #[instrument(skip(wm))]
 pub async fn state_c(wm: impl WorldModel) -> State {
     select!(
-        TransitionOnResult(True(), Some(Success().into()), true, true),
-        TransitionOnResult(False(), None, true, true)
+        transition_on_result(ready(true), Some(success().into()), true, true),
+        transition_on_result(ready(false), None, true, true)
     )
     .await
 }
@@ -178,7 +166,7 @@ pub async fn state_c(wm: impl WorldModel) -> State {
 // choose a tune to hum
 #[instrument(skip(wm), ret)]
 pub async fn choose_tune(wm: impl WorldModel) -> bool {
-    select!(True(), True(), True()).await
+    select!(ready(true), ready(true), ready(true)).await
     // (X(hum_a_tune(wm.clone(), 2)) | X(hum_a_tune(wm, 3)) ).0.await
     // (X(hum_a_tune(wm.clone(), 2)) | X(hum_a_tune(wm.clone(), 3)) | X(hum_a_tune(wm, 3))) .0 .await
     //((X(hum_a_tune(wm.clone(), 2)) | X(hum_a_tune(wm, 3))) | X(hum_a_tune(wm, 4))).0.await
@@ -200,8 +188,10 @@ struct InnerWorldModel {
     hummed: Cell<u8>,
 }
 
+trait WorldModel: Any + Clone + Debug {}
+
 #[derive(Debug, Default, Clone)]
-struct SharedWorldModel(Rc<InnerWorldModel>);
+struct SharedWorldModel(pub Rc<InnerWorldModel>);
 impl WorldModel for SharedWorldModel {}
 
 impl InnerWorldModel {
@@ -308,9 +298,9 @@ mod tests {
 
     #[test]
     fn state_equality_checks() {
-        let a = State::from(Success());
-        let b = State::from(Success());
-        let c = State::from(Failure());
+        let a = State::from(success());
+        let b = State::from(success());
+        let c = State::from(failure());
         assert!(a.0 == b.0);
         assert!(b.0 != c.0);
         assert!(a.0 != c.0);
@@ -326,19 +316,18 @@ mod tests {
     }
 
     async fn test_root() -> bool {
-        any!(True(), False(), False()).await
+        any!(ready(true), ready(false), ready(false)).await
     }
 
     async fn choose_tune2() -> bool {
-        //try_zip!(True(), True()).await
-        all!(True(), True(), True()).await
+        //try_zip!(ready(true), ready(true)).await
+        all!(ready(true), ready(true), ready(true)).await
     }
 
     #[test]
     fn try_zip() {
         test_init();
     }
-    /*
 
     #[test]
     fn behaviour_tree_test() {
@@ -359,5 +348,4 @@ mod tests {
         assert!(futures_lite::future::block_on(ctx.root()));
         dbg!(ctx);
     }
-    */
 }
