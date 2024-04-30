@@ -16,7 +16,7 @@ pub use tracing::instrument;
 #[macro_export]
 macro_rules! select {
     ($head:expr, $($tail:tt)*) => {
-        future::race($head, select!($($tail)*))
+        future::or($head, select!($($tail)*))
     };
     ($head:expr) => { $head };
 }
@@ -32,47 +32,62 @@ macro_rules! join {
 #[macro_export]
 macro_rules! any {
     ($($args:tt)*) => {
-        recursive_try_zip!(true, $($args)*).map(to_bool).map(not)
+        recursive_try_zip!(true, $($args)*).map(|x|x.is_ok()).not()
     };
 }
 
 #[macro_export]
 macro_rules! all {
     ($($args:tt)*) => {
-        recursive_try_zip!(false, $($args)*).map(to_bool)
+        recursive_try_zip!(false, $($args)*).map(|x|x.is_ok())
     };
 }
 
 macro_rules! recursive_try_zip {
     ($inv:expr, $head:expr, $($tail:tt)*) => {
-        future::try_zip(to_result::<$inv>($head), recursive_try_zip!($inv, $($tail)*))
+        future::try_zip(recursive_try_zip!($inv, $head), recursive_try_zip!($inv, $($tail)*))
     };
-    ($inv:expr, $head:expr) => { to_result::<$inv>($head) };
+    ($inv:expr, $head:expr) => { async {($head.await ^ $inv).then_some(()).ok_or(()) } };
+
 }
 
 #[macro_export]
 macro_rules! repeat_until {
     ($f:expr, $until:expr) => {{
-        while $f.await ^ $until {}
-        true
-    }};
-    ($f:expr, $until:expr; $n:expr) => {
-        for _ in 0..$n {
-            if $f.await ^ !$until {
-                return true;
-            }
+        async {
+            while $f.await ^ $until {}
+            true
         }
-        false
+    }};
+    ($f:expr, $until:expr, $n:expr) => {
+        async {
+            for _ in 0..$n {
+                if $f.await ^ !$until {
+                    return true;
+                }
+            }
+            false
+        }
     };
 }
 
 // traits
-pub trait Map: Sized {
-    fn map<O, F: FnOnce(Self) -> O>(self, f: F) -> O {
-        f(self)
+pub trait FutureMap {
+    fn map<I, O>(self, f: impl FnOnce(I) -> O) -> impl Future<Output = O>
+    where
+        Self: Future<Output = I> + Sized,
+    {
+        async { f(self.await) }
+    }
+
+    fn not(self) -> impl Future<Output = bool>
+    where
+        Self: Future<Output = bool> + Sized,
+    {
+        async { !self.await }
     }
 }
-impl<T, F: Future<Output = T>> Map for F {}
+impl<F: Future> FutureMap for F {}
 
 pub enum State {
     Success,
@@ -106,24 +121,6 @@ impl Future for State {
 }
 
 // helpers
-
-#[instrument(skip(f))]
-pub async fn not(f: impl Future<Output = bool>) -> bool {
-    !f.await
-}
-
-async fn to_bool<T, E>(f: impl Future<Output = Result<T, E>>) -> bool {
-    f.await.is_ok()
-}
-
-async fn to_result<const INV: bool>(f: impl Future<Output = bool>) -> Result<(), ()> {
-    if f.await ^ INV {
-        Ok(())
-    } else {
-        Err(())
-    }
-}
-
 #[instrument(skip(f, state))]
 pub async fn transition_on_result(
     f: impl Future<Output = bool>,
@@ -357,7 +354,6 @@ mod tests {
     #[test]
     fn run_until_macro() {
         test_init();
-        let mut x = 3;
 
         #[instrument]
         async fn count_down(x: &mut u8) -> bool {
@@ -369,11 +365,12 @@ mod tests {
             }
         }
 
-        async fn root(x: &mut u8) -> bool {
-            repeat_until!(count_down(x), true)
-        }
-
-        assert!(block_on(root(&mut x)));
+        let mut x = 3;
+        assert!(block_on(repeat_until!(count_down(&mut x), true)));
+        x = 3;
+        assert!(block_on(repeat_until!(count_down(&mut x), true, 4)));
+        x = 3;
+        assert!(!block_on(repeat_until!(count_down(&mut x), true, 3)));
         assert_eq!(x, 0);
     }
 
