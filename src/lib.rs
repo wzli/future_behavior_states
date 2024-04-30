@@ -45,24 +45,20 @@ pub(crate) use any;
 // traits
 trait WorldModel: Any + Clone + Debug {}
 
-trait StateFuture: Future<Output = State> + Any {
-    fn state_id(&self) -> TypeId {
-        self.type_id()
-    }
-}
+trait FutureState: Future<Output = State> + Any {}
 
-struct State(Pin<Box<dyn StateFuture>>);
+struct State(Pin<Box<dyn FutureState>>);
 
 // trait implementations
-impl<F: Future<Output = State> + Any> StateFuture for F {}
+impl<F: Future<Output = State> + Any> FutureState for F {}
 
-impl PartialEq for dyn StateFuture {
+impl PartialEq for dyn FutureState {
     fn eq(&self, other: &Self) -> bool {
-        self.state_id() == other.state_id()
+        self.type_id() == other.type_id()
     }
 }
 
-impl<F: Future<Output = State> + Any> From<F> for State {
+impl<F: FutureState> From<F> for State {
     fn from(f: F) -> State {
         State(Box::pin(f))
     }
@@ -71,19 +67,19 @@ impl<F: Future<Output = State> + Any> From<F> for State {
 impl Future for State {
     type Output = bool;
     fn poll(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
-        let Poll::Ready(next_state) = self.0.poll(ctx) else {
-            return Poll::Pending;
-        };
-        let ret = if self.0 == State::from(Success()).0 {
-            Poll::Ready(true)
-        } else if self.0 == State::from(Failure()).0 {
-            Poll::Ready(false)
+        if let Poll::Ready(next_state) = self.0.poll(ctx) {
+            if self.0 == State::from(Success()).0 {
+                Poll::Ready(true)
+            } else if self.0 == State::from(Failure()).0 {
+                Poll::Ready(false)
+            } else {
+                *self = next_state;
+                ctx.waker().wake_by_ref();
+                Poll::Pending
+            }
         } else {
-            ctx.waker().wake_by_ref();
             Poll::Pending
-        };
-        *self = next_state;
-        ret
+        }
     }
 }
 
