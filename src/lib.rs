@@ -67,9 +67,6 @@ macro_rules! repeat_until {
 }
 
 // traits
-pub trait FutureState: Future<Output = State> + Any {}
-impl<F: Future<Output = State> + Any> FutureState for F {}
-
 pub trait Map: Sized {
     fn map<O, F: FnOnce(Self) -> O>(self, f: F) -> O {
         f(self)
@@ -77,52 +74,38 @@ pub trait Map: Sized {
 }
 impl<T, F: Future<Output = T>> Map for F {}
 
-pub struct State(Pin<Box<dyn FutureState>>);
+pub enum State {
+    Success,
+    Failure,
+    Running(Pin<Box<dyn Future<Output = State>>>),
+}
 
 // trait implementations
 
-impl PartialEq for dyn FutureState {
-    fn eq(&self, other: &Self) -> bool {
-        self.type_id() == other.type_id()
-    }
-}
-
-impl<F: FutureState> From<F> for State {
+impl<F: Future<Output = State> + Any> From<F> for State {
     fn from(f: F) -> State {
-        State(Box::pin(f))
+        State::Running(Box::pin(f))
     }
 }
 
 impl Future for State {
     type Output = bool;
     fn poll(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
-        if let Poll::Ready(next_state) = self.0.poll(ctx) {
-            if self.0 == State::from(success()).0 {
-                Poll::Ready(true)
-            } else if self.0 == State::from(failure()).0 {
-                Poll::Ready(false)
-            } else {
-                *self = next_state;
-                ctx.waker().wake_by_ref();
+        match &mut *self {
+            State::Success => Poll::Ready(true),
+            State::Failure => Poll::Ready(false),
+            State::Running(state) => {
+                if let Poll::Ready(next_state) = state.poll(ctx) {
+                    *self = next_state;
+                    ctx.waker().wake_by_ref();
+                }
                 Poll::Pending
             }
-        } else {
-            Poll::Pending
         }
     }
 }
 
 // helpers
-
-#[instrument]
-pub async fn success() -> State {
-    success().into()
-}
-
-#[instrument]
-pub async fn failure() -> State {
-    failure().into()
-}
 
 #[instrument(skip(f))]
 pub async fn not(f: impl Future<Output = bool>) -> bool {
@@ -151,6 +134,15 @@ pub async fn transition_on_result(
     if let Some(state) = state {
         let result = f.await;
         if (result && on_success) || (!result && on_failure) {
+            tracing::event!(
+                tracing::Level::INFO,
+                "{}",
+                match state {
+                    State::Success => "Success",
+                    State::Success => "Failure",
+                    _ => "Next State",
+                }
+            );
             return state;
         }
     }
@@ -170,7 +162,7 @@ pub async fn state_b(wm: impl WorldModel) -> State {
 #[instrument(skip(_wm))]
 pub async fn state_c(_wm: impl WorldModel) -> State {
     select!(
-        transition_on_result(ready(true), Some(success().into()), true, true),
+        transition_on_result(ready(true), Some(State::Success), true, true),
         transition_on_result(ready(false), None, true, true)
     )
     .await
@@ -318,6 +310,7 @@ mod tests {
             .try_init();
     }
 
+    /*
     #[test]
     fn state_equality_checks() {
         let a = State::from(success());
@@ -327,6 +320,7 @@ mod tests {
         assert!(b.0 != c.0);
         assert!(a.0 != c.0);
     }
+    */
 
     #[test]
     fn state_machine_test() {
