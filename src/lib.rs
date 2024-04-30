@@ -1,48 +1,55 @@
+#![allow(clippy::async_yields_async)]
+
 use futures_lite::{future, FutureExt};
-use std::any::{Any, TypeId};
+use std::any::Any;
 use std::cell::Cell;
 use std::fmt::Debug;
 use std::future::{pending, ready, Future};
 use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll};
-use tracing::instrument;
 
-use std::cell::OnceCell;
+pub use tracing::instrument;
 
 // macros
 
+#[macro_export]
 macro_rules! select {
-    ($num:expr, $($tail:tt)*) => {
-        future::race($num, select!($($tail)*))
+    ($head:expr, $($tail:tt)*) => {
+        future::race($head, select!($($tail)*))
     };
-    ($num:expr) => { $num };
+    ($head:expr) => { $head };
 }
-pub(crate) use select;
 
+#[macro_export]
 macro_rules! join {
-    ($num:expr, $($tail:tt)*) => {
-        future::zip($num, join!($($tail)*))
+    ($head:expr, $($tail:tt)*) => {
+        future::zip($head, join!($($tail)*))
     };
-    ($num:expr) => { $num };
+    ($head:expr) => { $head };
 }
-pub(crate) use join;
 
-macro_rules! all {
-    ($num:expr, $($tail:tt)*) => {
-        future::try_zip(to_result($num), all!($($tail)*).map(to_result)).map(to_bool)
-    };
-    ($num:expr) => { $num };
-}
-pub(crate) use all;
-
+#[macro_export]
 macro_rules! any {
-    ($num:expr, $($tail:tt)*) => {
-        future::try_zip(to_result(not($num)), any!($($tail)*).map(to_result)).map(to_bool).map(not)
+    ($head:expr, $($tail:tt)*) => {
+        future::try_zip(to_result(not($head)), any!($($tail)*).map(to_result)).map(to_bool).map(not)
     };
-    ($num:expr) => { $num };
+    ($head:expr) => { $head };
 }
-pub(crate) use any;
+
+#[macro_export]
+macro_rules! all {
+    ($($args:tt)*) => {
+        all_inner!($($args)*).map(to_bool)
+    };
+}
+
+macro_rules! all_inner {
+    ($head:expr, $($tail:tt)*) => {
+        future::try_zip(to_result($head), all_inner!($($tail)*))
+    };
+    ($head:expr) => { to_result($head) };
+}
 
 // traits
 pub trait FutureState: Future<Output = State> + Any {}
@@ -55,7 +62,7 @@ pub trait Map: Sized {
 }
 impl<T, F: Future<Output = T>> Map for F {}
 
-struct State(Pin<Box<dyn FutureState>>);
+pub struct State(Pin<Box<dyn FutureState>>);
 
 // trait implementations
 
@@ -116,11 +123,11 @@ pub async fn RunUntil(f: impl Future<Output = bool>, terminate_on: bool, result:
 }
 */
 
-async fn to_bool<T, E>(f: impl Future<Output = Result<T, E>>) -> bool {
+pub async fn to_bool<T, E>(f: impl Future<Output = Result<T, E>>) -> bool {
     f.await.is_ok()
 }
 
-async fn to_result(f: impl Future<Output = bool>) -> Result<(), ()> {
+pub async fn to_result(f: impl Future<Output = bool>) -> Result<(), ()> {
     if f.await {
         Ok(())
     } else {
@@ -154,8 +161,8 @@ pub async fn state_b(wm: impl WorldModel) -> State {
     state_c(wm.clone()).into()
 }
 
-#[instrument(skip(wm))]
-pub async fn state_c(wm: impl WorldModel) -> State {
+#[instrument(skip(_wm))]
+pub async fn state_c(_wm: impl WorldModel) -> State {
     select!(
         transition_on_result(ready(true), Some(success().into()), true, true),
         transition_on_result(ready(false), None, true, true)
@@ -164,45 +171,53 @@ pub async fn state_c(wm: impl WorldModel) -> State {
 }
 
 // choose a tune to hum
-#[instrument(skip(wm), ret)]
-pub async fn choose_tune(wm: impl WorldModel) -> bool {
+#[instrument(skip(_wm), ret)]
+pub async fn choose_tune(_wm: impl WorldModel) -> bool {
     select!(ready(true), ready(true), ready(true)).await
     // (X(hum_a_tune(wm.clone(), 2)) | X(hum_a_tune(wm, 3)) ).0.await
     // (X(hum_a_tune(wm.clone(), 2)) | X(hum_a_tune(wm.clone(), 3)) | X(hum_a_tune(wm, 3))) .0 .await
     //((X(hum_a_tune(wm.clone(), 2)) | X(hum_a_tune(wm, 3))) | X(hum_a_tune(wm, 4))).0.await
 }
 
-#[instrument(skip(wm), ret)]
-pub async fn hum_a_tune(wm: impl WorldModel, id: u8) -> bool {
+#[instrument(skip(_wm), ret)]
+pub async fn hum_a_tune(_wm: impl WorldModel, id: u8) -> bool {
     false
 }
 
 #[derive(Debug, Default)]
-struct InnerWorldModel {
-    enemy_near: Cell<bool>,
-    moved_to_enemy: Cell<bool>,
-    attacked: Cell<bool>,
-    is_on_grass: Cell<bool>,
-    sat_down: Cell<bool>,
-    waited: Cell<bool>,
-    hummed: Cell<u8>,
+pub struct InnerWorldModel {
+    pub enemy_near: Cell<bool>,
+    pub moved_to_enemy: Cell<bool>,
+    pub attacked: Cell<bool>,
+    pub is_on_grass: Cell<bool>,
+    pub sat_down: Cell<bool>,
+    pub waited: Cell<bool>,
+    pub hummed: Cell<u8>,
 }
 
-trait WorldModel: Any + Clone + Debug {}
+pub trait WorldModel: Any + Clone + Debug {}
 
 #[derive(Debug, Default, Clone)]
-struct SharedWorldModel(pub Rc<InnerWorldModel>);
+pub struct SharedWorldModel(pub Rc<InnerWorldModel>);
 impl WorldModel for SharedWorldModel {}
 
 impl InnerWorldModel {
     #[instrument(skip(self), ret)]
     pub async fn root(&self) -> bool {
-        self.handle_enemy().await || self.chill_on_grass().await || self.choose_tune().await
+        self.handle_enemy().await
+            || self.chill_on_grass().await
+            || self.choose_tune().await
+            || self.choose_tune2().await
     }
 
     // choose a tune to hum
     pub async fn choose_tune(&self) -> bool {
         future::or(self.hum_a_tune(2), self.hum_a_tune(1)).await
+    }
+
+    pub async fn choose_tune2(&self) -> bool {
+        //try_zip!(ready(true), ready(true)).await
+        all!(ready(true), ready(true)).await
     }
 
     #[instrument(skip(self), ret)]
@@ -315,15 +330,6 @@ mod tests {
         dbg!(ret);
     }
 
-    async fn test_root() -> bool {
-        any!(ready(true), ready(false), ready(false)).await
-    }
-
-    async fn choose_tune2() -> bool {
-        //try_zip!(ready(true), ready(true)).await
-        all!(ready(true), ready(true), ready(true)).await
-    }
-
     #[test]
     fn try_zip() {
         test_init();
@@ -333,7 +339,7 @@ mod tests {
     fn behaviour_tree_test() {
         test_init();
 
-        let mut ctx = InnerWorldModel {
+        let ctx = InnerWorldModel {
             enemy_near: false.into(),
             moved_to_enemy: false.into(),
             attacked: false.into(),
