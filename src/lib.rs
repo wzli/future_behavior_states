@@ -129,20 +129,11 @@ pub async fn not(f: impl Future<Output = bool>) -> bool {
     !f.await
 }
 
-// TODO: this needs to be macro to avoid requirement for copy
-/*
-#[instrument(skip(f))]
-pub async fn RunUntil(f: impl Future<Output = bool>, until: bool, result: bool) -> bool {
-    while f.await != until {};
-    result
-}
-*/
-
-pub async fn to_bool<T, E>(f: impl Future<Output = Result<T, E>>) -> bool {
+async fn to_bool<T, E>(f: impl Future<Output = Result<T, E>>) -> bool {
     f.await.is_ok()
 }
 
-pub async fn to_result<const INV: bool>(f: impl Future<Output = bool>) -> Result<(), ()> {
+async fn to_result<const INV: bool>(f: impl Future<Output = bool>) -> Result<(), ()> {
     if f.await ^ INV {
         Ok(())
     } else {
@@ -375,6 +366,7 @@ mod tests {
         test_init();
         let mut x = 3;
 
+        #[instrument]
         async fn count_down(x: &mut u8) -> bool {
             if *x == 0 {
                 true
