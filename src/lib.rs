@@ -1,6 +1,5 @@
 #![no_std]
 #![allow(clippy::async_yields_async)]
-
 extern crate alloc;
 use alloc::boxed::Box;
 
@@ -9,8 +8,8 @@ use core::fmt::Debug;
 use core::future::{pending, Future};
 use core::pin::Pin;
 use core::task::Poll;
-use futures_lite::FutureExt;
 
+pub use futures_lite::{future, FutureExt};
 pub use tracing::instrument;
 
 // macros
@@ -19,7 +18,7 @@ pub use tracing::instrument;
 macro_rules! select {
     ($head:expr $(,)?) => { $head };
     ($head:expr, $($tail:tt)*) => {
-        futures_lite::future::or($head, select!($($tail)*))
+        future::or($head, select!($($tail)*))
     };
 }
 
@@ -27,7 +26,7 @@ macro_rules! select {
 macro_rules! join {
     ($head:expr $(,)?) => { $head };
     ($head:expr, $($tail:tt)*) => {
-        futures_lite::future::zip($head, join!($($tail)*))
+        future::zip($head, join!($($tail)*))
     };
 }
 
@@ -49,17 +48,14 @@ macro_rules! all {
 macro_rules! recursive_try_zip {
     ($inv:expr, $head:expr $(,)?) => { async {($head.await ^ $inv).then_some(()).ok_or(()) } };
     ($inv:expr, $head:expr, $($tail:tt)*) => {
-        futures_lite::future::try_zip(recursive_try_zip!($inv, $head), recursive_try_zip!($inv, $($tail)*))
+        future::try_zip(recursive_try_zip!($inv, $head), recursive_try_zip!($inv, $($tail)*))
     };
 }
 
 #[macro_export]
 macro_rules! repeat_until {
     ($f:expr, $until:expr $(,)?) => {
-        async {
-            while $f.await ^ $until {}
-            true
-        }
+        repeat_until!($f, $until, usize::MAX)
     };
     ($f:expr, $until:expr, $n:expr $(,)?) => {
         async {
@@ -67,6 +63,7 @@ macro_rules! repeat_until {
                 if $f.await ^ !$until {
                     return true;
                 }
+                future::yield_now().await
             }
             false
         }
