@@ -167,12 +167,14 @@ pub async fn transition(
 mod tests {
     use super::*;
     use alloc::rc::Rc;
+    use async_broadcast::{broadcast, Receiver, Sender};
     use core::cell::Cell;
     use core::future::ready;
     use futures_lite::future::block_on;
 
     fn test_init() {
         let _ = tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
             .with_span_events(tracing_subscriber::fmt::format::FmtSpan::NEW)
             .with_target(false)
             .try_init();
@@ -224,6 +226,7 @@ mod tests {
         pub sat_down: Cell<bool>,
         pub waited: Cell<bool>,
         pub hummed: Cell<u8>,
+        pub topic: Option<(Sender<u32>, Receiver<u32>)>,
     }
 
     pub trait WorldModel: Any + Clone + Debug {}
@@ -235,6 +238,9 @@ mod tests {
     impl InnerWorldModel {
         #[instrument(skip(self), ret)]
         pub async fn root(&self) -> bool {
+            let (tx, mut rx) = self.topic.clone().unwrap();
+            let _ = tx.broadcast(33).await;
+            let _ = rx.recv().await;
             self.handle_enemy().await
                 || self.chill_on_grass().await
                 || self.choose_tune().await
@@ -391,16 +397,11 @@ mod tests {
     fn behaviour_tree_test() {
         test_init();
 
+        let topic = Some(broadcast::<u32>(2));
+
         let ctx = InnerWorldModel {
-            enemy_near: false.into(),
-            moved_to_enemy: false.into(),
-            attacked: false.into(),
-
-            is_on_grass: false.into(),
-            sat_down: false.into(),
-            waited: false.into(),
-
-            hummed: 0.into(),
+            topic,
+            ..Default::default()
         };
 
         assert!(block_on(ctx.root()));
