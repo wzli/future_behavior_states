@@ -1,13 +1,11 @@
 #![allow(clippy::async_yields_async)]
 
-use futures_lite::{future, FutureExt};
-use std::any::Any;
-use std::cell::Cell;
-use std::fmt::Debug;
-use std::future::{pending, ready, Future};
-use std::pin::Pin;
-use std::rc::Rc;
-use std::task::{Context, Poll};
+use core::any::Any;
+use core::fmt::Debug;
+use core::future::{pending, Future};
+use core::pin::Pin;
+use core::task::Poll;
+use futures_lite::FutureExt;
 
 pub use tracing::instrument;
 
@@ -15,18 +13,18 @@ pub use tracing::instrument;
 
 #[macro_export]
 macro_rules! select {
+    ($head:expr $(,)?) => { $head };
     ($head:expr, $($tail:tt)*) => {
-        future::or($head, select!($($tail)*))
+        futures_lite::future::or($head, select!($($tail)*))
     };
-    ($head:expr) => { $head };
 }
 
 #[macro_export]
 macro_rules! join {
+    ($head:expr $(,)?) => { $head };
     ($head:expr, $($tail:tt)*) => {
-        future::zip($head, join!($($tail)*))
+        futures_lite::future::zip($head, join!($($tail)*))
     };
-    ($head:expr) => { $head };
 }
 
 #[macro_export]
@@ -43,23 +41,23 @@ macro_rules! all {
     };
 }
 
+#[macro_export]
 macro_rules! recursive_try_zip {
+    ($inv:expr, $head:expr $(,)?) => { async {($head.await ^ $inv).then_some(()).ok_or(()) } };
     ($inv:expr, $head:expr, $($tail:tt)*) => {
-        future::try_zip(recursive_try_zip!($inv, $head), recursive_try_zip!($inv, $($tail)*))
+        futures_lite::future::try_zip(recursive_try_zip!($inv, $head), recursive_try_zip!($inv, $($tail)*))
     };
-    ($inv:expr, $head:expr) => { async {($head.await ^ $inv).then_some(()).ok_or(()) } };
-
 }
 
 #[macro_export]
 macro_rules! repeat_until {
-    ($f:expr, $until:expr) => {{
+    ($f:expr, $until:expr $(,)?) => {
         async {
             while $f.await ^ $until {}
             true
         }
-    }};
-    ($f:expr, $until:expr, $n:expr) => {
+    };
+    ($f:expr, $until:expr, $n:expr $(,)?) => {
         async {
             for _ in 0..$n {
                 if $f.await ^ !$until {
@@ -71,11 +69,22 @@ macro_rules! repeat_until {
     };
 }
 
-// traits
-pub trait FutureMap {
-    fn map<I, O>(self, f: impl FnOnce(I) -> O) -> impl Future<Output = O>
+#[macro_export]
+macro_rules! transition_if {
+    ($f:expr, $s:expr $(,)?) => {
+        transition(repeat_until!($f, true), Some($s), None)
+    };
+}
+
+// Future trait extensions
+pub trait FutureEx: Future {
+    fn type_name(&self) -> &'static str {
+        core::any::type_name::<Self>()
+    }
+
+    fn map<O>(self, f: impl FnOnce(<Self as Future>::Output) -> O) -> impl Future<Output = O>
     where
-        Self: Future<Output = I> + Sized,
+        Self: Sized,
     {
         async { f(self.await) }
     }
@@ -87,15 +96,32 @@ pub trait FutureMap {
         async { !self.await }
     }
 }
-impl<F: Future> FutureMap for F {}
 
+impl<T, F: Future<Output = T>> FutureEx for F {}
+
+impl<T: Any> Debug for dyn FutureEx<Output = T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let s = self.type_name();
+        for token in s
+            .strip_suffix("::{{closure}}")
+            .unwrap_or(s)
+            .split('<')
+            .flat_map(|s| s.split('>'))
+            .step_by(2)
+        {
+            f.write_str(token)?
+        }
+        Ok(())
+    }
+}
+
+// State implementation
+#[derive(Debug)]
 pub enum State {
     Success,
     Failure,
-    Running(Pin<Box<dyn Future<Output = State>>>),
+    Running(Pin<Box<dyn FutureEx<Output = State>>>),
 }
-
-// trait implementations
 
 impl<F: Future<Output = State> + Any> From<F> for State {
     fn from(f: F) -> State {
@@ -105,7 +131,7 @@ impl<F: Future<Output = State> + Any> From<F> for State {
 
 impl Future for State {
     type Output = bool;
-    fn poll(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, ctx: &mut core::task::Context<'_>) -> Poll<Self::Output> {
         match &mut *self {
             State::Success => Poll::Ready(true),
             State::Failure => Poll::Ready(false),
@@ -120,184 +146,31 @@ impl Future for State {
     }
 }
 
-// helpers
-#[instrument(skip(f, state))]
-pub async fn transition_on_result(
+#[instrument(skip(f), ret)]
+pub async fn transition(
     f: impl Future<Output = bool>,
-    state: Option<State>,
-    on_success: bool,
-    on_failure: bool,
+    success_state: Option<State>,
+    failure_state: Option<State>,
 ) -> State {
-    if let Some(state) = state {
-        let result = f.await;
-        if (result && on_success) || (!result && on_failure) {
-            tracing::event!(
-                tracing::Level::INFO,
-                state = match state {
-                    State::Success => "Success",
-                    State::Failure => "Failure",
-                    _ => "Next",
-                }
-            );
+    if f.await {
+        if let Some(state) = success_state {
+            return state;
+        }
+    } else {
+        if let Some(state) = failure_state {
             return state;
         }
     }
     pending().await
 }
 
-#[instrument(skip(wm))]
-pub async fn state_a(wm: impl WorldModel) -> State {
-    state_b(wm.clone()).into()
-}
-
-#[instrument(skip(wm))]
-pub async fn state_b(wm: impl WorldModel) -> State {
-    state_c(wm.clone()).into()
-}
-
-#[instrument(skip(_wm))]
-pub async fn state_c(_wm: impl WorldModel) -> State {
-    select!(
-        transition_on_result(ready(true), Some(State::Success), true, true),
-        transition_on_result(ready(false), None, true, true)
-    )
-    .await
-}
-
-// choose a tune to hum
-#[instrument(skip(_wm), ret)]
-pub async fn choose_tune(_wm: impl WorldModel) -> bool {
-    select!(ready(true), ready(true), ready(true)).await
-    // (X(hum_a_tune(wm.clone(), 2)) | X(hum_a_tune(wm, 3)) ).0.await
-    // (X(hum_a_tune(wm.clone(), 2)) | X(hum_a_tune(wm.clone(), 3)) | X(hum_a_tune(wm, 3))) .0 .await
-    //((X(hum_a_tune(wm.clone(), 2)) | X(hum_a_tune(wm, 3))) | X(hum_a_tune(wm, 4))).0.await
-}
-
-#[instrument(skip(_wm), ret)]
-pub async fn hum_a_tune(_wm: impl WorldModel, id: u8) -> bool {
-    false
-}
-
-#[derive(Debug, Default)]
-pub struct InnerWorldModel {
-    pub enemy_near: Cell<bool>,
-    pub moved_to_enemy: Cell<bool>,
-    pub attacked: Cell<bool>,
-    pub is_on_grass: Cell<bool>,
-    pub sat_down: Cell<bool>,
-    pub waited: Cell<bool>,
-    pub hummed: Cell<u8>,
-}
-
-pub trait WorldModel: Any + Clone + Debug {}
-
-#[derive(Debug, Default, Clone)]
-pub struct SharedWorldModel(pub Rc<InnerWorldModel>);
-impl WorldModel for SharedWorldModel {}
-
-impl InnerWorldModel {
-    #[instrument(skip(self), ret)]
-    pub async fn root(&self) -> bool {
-        self.handle_enemy().await
-            || self.chill_on_grass().await
-            || self.choose_tune().await
-            || self.choose_tune2().await
-    }
-
-    // choose a tune to hum
-    pub async fn choose_tune(&self) -> bool {
-        future::or(self.hum_a_tune(2), self.hum_a_tune(1)).await
-    }
-
-    pub async fn choose_tune2(&self) -> bool {
-        //try_zip!(ready(true), ready(true)).await
-        all!(ready(true), ready(true)).await
-    }
-
-    #[instrument(skip(self), ret)]
-    pub async fn hum_a_tune(&self, id: u8) -> bool {
-        if self.hummed.get() != 0 {
-            return false;
-        }
-        self.hummed.set(id);
-        true
-    }
-
-    // handle enemy
-    #[instrument(skip(self), ret)]
-    pub async fn handle_enemy(&self) -> bool {
-        self.is_enemy_near().await & self.move_to_enemy().await & self.attack_enemy().await
-    }
-
-    #[instrument(skip(self), ret)]
-    pub async fn is_enemy_near(&self) -> bool {
-        self.enemy_near.get()
-    }
-
-    #[instrument(skip(self), ret)]
-    pub async fn move_to_enemy(&self) -> bool {
-        if self.moved_to_enemy.get() {
-            return false;
-        }
-        self.moved_to_enemy.set(true);
-        true
-    }
-
-    #[instrument(skip(self), ret)]
-    pub async fn attack_enemy(&self) -> bool {
-        if self.attacked.get() {
-            return false;
-        }
-        self.attacked.set(true);
-        true
-    }
-
-    // chill on grass
-    #[instrument(skip(self), ret)]
-    pub async fn chill_on_grass(&self) -> bool {
-        self.standing_on_grass().await
-            & self.sit_down().await
-            & self.delay().await
-            & self.stand_up().await
-    }
-
-    #[instrument(skip(self), ret)]
-    pub async fn standing_on_grass(&self) -> bool {
-        !self.sat_down.get() & self.is_on_grass.get()
-    }
-
-    #[instrument(skip(self), ret)]
-    pub async fn sit_down(&self) -> bool {
-        if self.sat_down.get() {
-            return false;
-        }
-        self.sat_down.set(true);
-        true
-    }
-
-    #[instrument(skip(self), ret)]
-    pub async fn delay(&self) -> bool {
-        if self.waited.get() {
-            return false;
-        }
-        self.waited.set(true);
-        true
-    }
-
-    #[instrument(skip(self), ret)]
-    pub async fn stand_up(&self) -> bool {
-        if !self.sat_down.get() {
-            return false;
-        }
-        self.sat_down.set(true);
-        true
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::cell::Cell;
+    use core::future::ready;
     use futures_lite::future::block_on;
+    use std::rc::Rc;
 
     fn test_init() {
         let _ = tracing_subscriber::fmt()
@@ -306,17 +179,158 @@ mod tests {
             .try_init();
     }
 
-    /*
-    #[test]
-    fn state_equality_checks() {
-        let a = State::from(success());
-        let b = State::from(success());
-        let c = State::from(failure());
-        assert!(a.0 == b.0);
-        assert!(b.0 != c.0);
-        assert!(a.0 != c.0);
+    #[instrument(skip(wm))]
+    pub async fn state_a(wm: impl WorldModel) -> State {
+        state_b(wm.clone()).into()
     }
-    */
+
+    #[instrument(skip(wm))]
+    pub async fn state_b(wm: impl WorldModel) -> State {
+        state_c(wm.clone()).into()
+    }
+
+    #[instrument(skip(wm))]
+    pub async fn state_c(wm: impl WorldModel) -> State {
+        select!(
+            transition(ready(false), None, None),
+            transition(ready(true), Some(State::Success), None),
+            transition(ready(true), Some(State::Success), None),
+            transition(ready(true), Some(State::Success), None),
+            transition_if!(ready(true).not(), State::Success),
+            transition_if!(ready(true).not(), state_c(wm.clone()).into()),
+        )
+        .await
+    }
+
+    // choose a tune to hum
+    #[instrument(skip(_wm), ret)]
+    pub async fn choose_tune(_wm: impl WorldModel) -> bool {
+        select!(ready(true), ready(true), ready(true)).await
+        // (X(hum_a_tune(wm.clone(), 2)) | X(hum_a_tune(wm, 3)) ).0.await
+        // (X(hum_a_tune(wm.clone(), 2)) | X(hum_a_tune(wm.clone(), 3)) | X(hum_a_tune(wm, 3))) .0 .await
+        //((X(hum_a_tune(wm.clone(), 2)) | X(hum_a_tune(wm, 3))) | X(hum_a_tune(wm, 4))).0.await
+    }
+
+    #[instrument(skip(_wm), ret)]
+    pub async fn hum_a_tune(_wm: impl WorldModel, id: u8) -> bool {
+        false
+    }
+
+    #[derive(Debug, Default)]
+    pub struct InnerWorldModel {
+        pub enemy_near: Cell<bool>,
+        pub moved_to_enemy: Cell<bool>,
+        pub attacked: Cell<bool>,
+        pub is_on_grass: Cell<bool>,
+        pub sat_down: Cell<bool>,
+        pub waited: Cell<bool>,
+        pub hummed: Cell<u8>,
+    }
+
+    pub trait WorldModel: Any + Clone + Debug {}
+
+    #[derive(Debug, Default, Clone)]
+    pub struct SharedWorldModel(pub Rc<InnerWorldModel>);
+    impl WorldModel for SharedWorldModel {}
+
+    impl InnerWorldModel {
+        #[instrument(skip(self), ret)]
+        pub async fn root(&self) -> bool {
+            self.handle_enemy().await
+                || self.chill_on_grass().await
+                || self.choose_tune().await
+                || self.choose_tune2().await
+        }
+
+        // choose a tune to hum
+        pub async fn choose_tune(&self) -> bool {
+            any!(self.hum_a_tune(2), self.hum_a_tune(1)).await
+        }
+
+        pub async fn choose_tune2(&self) -> bool {
+            //try_zip!(ready(true), ready(true)).await
+            all!(ready(true), ready(true)).await
+        }
+
+        #[instrument(skip(self), ret)]
+        pub async fn hum_a_tune(&self, id: u8) -> bool {
+            if self.hummed.get() != 0 {
+                return false;
+            }
+            self.hummed.set(id);
+            true
+        }
+
+        // handle enemy
+        #[instrument(skip(self), ret)]
+        pub async fn handle_enemy(&self) -> bool {
+            self.is_enemy_near().await & self.move_to_enemy().await & self.attack_enemy().await
+        }
+
+        #[instrument(skip(self), ret)]
+        pub async fn is_enemy_near(&self) -> bool {
+            self.enemy_near.get()
+        }
+
+        #[instrument(skip(self), ret)]
+        pub async fn move_to_enemy(&self) -> bool {
+            if self.moved_to_enemy.get() {
+                return false;
+            }
+            self.moved_to_enemy.set(true);
+            true
+        }
+
+        #[instrument(skip(self), ret)]
+        pub async fn attack_enemy(&self) -> bool {
+            if self.attacked.get() {
+                return false;
+            }
+            self.attacked.set(true);
+            true
+        }
+
+        // chill on grass
+        #[instrument(skip(self), ret)]
+        pub async fn chill_on_grass(&self) -> bool {
+            self.standing_on_grass().await
+                & self.sit_down().await
+                & self.delay().await
+                & self.stand_up().await
+        }
+
+        #[instrument(skip(self), ret)]
+        pub async fn standing_on_grass(&self) -> bool {
+            !self.sat_down.get() & self.is_on_grass.get()
+        }
+
+        #[instrument(skip(self), ret)]
+        pub async fn sit_down(&self) -> bool {
+            if self.sat_down.get() {
+                return false;
+            }
+            self.sat_down.set(true);
+            true
+        }
+
+        #[instrument(skip(self), ret)]
+        pub async fn delay(&self) -> bool {
+            if self.waited.get() {
+                return false;
+            }
+            self.waited.set(true);
+            true
+        }
+
+        #[instrument(skip(self), ret)]
+        pub async fn stand_up(&self) -> bool {
+            if !self.sat_down.get() {
+                return false;
+            }
+            self.sat_down.set(true);
+            true
+        }
+    }
 
     #[test]
     fn state_machine_test() {
@@ -343,7 +357,7 @@ mod tests {
     fn all_macro() {
         test_init();
         async fn root(a: bool, b: bool) -> bool {
-            all!(ready(a), ready(b)).await
+            all!(ready(a), ready(b),).await
         }
         assert!(!block_on(root(false, false)));
         assert!(!block_on(root(false, true)));
