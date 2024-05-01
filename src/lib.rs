@@ -1,4 +1,8 @@
+#![no_std]
 #![allow(clippy::async_yields_async)]
+
+extern crate alloc;
+use alloc::boxed::Box;
 
 use core::any::Any;
 use core::fmt::Debug;
@@ -156,10 +160,8 @@ pub async fn transition(
         if let Some(state) = success_state {
             return state;
         }
-    } else {
-        if let Some(state) = failure_state {
-            return state;
-        }
+    } else if let Some(state) = failure_state {
+        return state;
     }
     pending().await
 }
@@ -167,10 +169,10 @@ pub async fn transition(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::rc::Rc;
     use core::cell::Cell;
     use core::future::ready;
     use futures_lite::future::block_on;
-    use std::rc::Rc;
 
     fn test_init() {
         let _ = tracing_subscriber::fmt()
@@ -338,7 +340,7 @@ mod tests {
         let wm = SharedWorldModel::default();
         let root = State::from(state_a(wm));
         let ret = futures_lite::future::block_on(root);
-        dbg!(ret);
+        tracing::debug!(ret);
     }
 
     #[test]
@@ -405,6 +407,6 @@ mod tests {
         };
 
         assert!(block_on(ctx.root()));
-        dbg!(ctx);
+        tracing::debug!(?ctx);
     }
 }
