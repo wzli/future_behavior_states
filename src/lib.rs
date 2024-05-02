@@ -3,7 +3,6 @@
 extern crate alloc;
 use alloc::boxed::Box;
 
-use core::any::Any;
 use core::fmt::Debug;
 use core::future::{pending, Future};
 use core::pin::Pin;
@@ -100,7 +99,7 @@ pub trait FutureEx: Future {
 
 impl<T, F: Future<Output = T>> FutureEx for F {}
 
-impl<T: Any> Debug for dyn FutureEx<Output = T> {
+impl<T> Debug for dyn FutureEx<Output = T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let s = self.type_name();
         for token in s
@@ -124,7 +123,7 @@ pub enum State {
     Running(Pin<Box<dyn FutureEx<Output = State>>>),
 }
 
-impl<F: Future<Output = State> + Any> From<F> for State {
+impl<F: Future<Output = State> + 'static> From<F> for State {
     fn from(f: F) -> State {
         State::Running(Box::pin(f))
     }
@@ -229,7 +228,7 @@ mod tests {
         pub topic: Option<(Sender<u32>, Receiver<u32>)>,
     }
 
-    pub trait WorldModel: Any + Clone + Debug {}
+    pub trait WorldModel: Clone + Debug + 'static {}
 
     #[derive(Debug, Default, Clone)]
     pub struct SharedWorldModel(pub Rc<InnerWorldModel>);
