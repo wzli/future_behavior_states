@@ -234,6 +234,55 @@ mod tests {
     pub struct SharedWorldModel(pub Rc<InnerWorldModel>);
     impl WorldModel for SharedWorldModel {}
 
+    #[derive(Debug, Default)]
+    pub struct Context<T>(Rc<T>);
+
+    impl<T> Clone for Context<T> {
+        fn clone(&self) -> Self {
+            Self(self.0.clone())
+        }
+    }
+
+    use core::ops::Deref;
+    impl<T> Deref for Context<T> {
+        type Target = T;
+        fn deref(&self) -> &T {
+            &self.0
+        }
+    }
+
+    impl Context<InnerWorldModel> {
+        /*
+        async fn state_a(self) -> State {
+            State::Success
+        }
+
+        async fn state_b(self) -> State {
+            loop {
+                if ready(false).await {
+                    break self.state_a().into();
+                } else if ready(false).await {
+                    break self.state_b().into();
+                }
+                future::yield_now().await
+            }
+            /*
+            if true {
+                self.state_a().into()
+            } else {
+                self.state_a().into()
+            }
+            */
+            /*
+            select!(
+                transition_if!(ready(false), self.clone().state_a().into()),
+                transition_if!(ready(false), self.clone().state_b().into())
+            ).await
+            */
+        }
+        */
+    }
+
     impl InnerWorldModel {
         #[instrument(skip(self), ret)]
         pub async fn root(&self) -> bool {
