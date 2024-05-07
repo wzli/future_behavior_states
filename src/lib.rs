@@ -11,43 +11,218 @@ use core::task::Poll;
 pub use futures_lite::{future, FutureExt};
 pub use tracing::instrument;
 
+use pin_project::pin_project;
+
+#[pin_project(project = EnumProj)]
+pub enum F2<A, B> {
+    A(#[pin] A),
+    B(#[pin] B),
+}
+
+pub enum E2<A, B> {
+    A(A),
+    B(B),
+}
+
+impl<A: Future, B: Future> Future for F2<A, B> {
+    type Output = E2<A::Output, B::Output>;
+    fn poll(self: Pin<&mut Self>, ctx: &mut core::task::Context<'_>) -> Poll<Self::Output> {
+        match self.project() {
+            EnumProj::A(a) => {
+                if let Poll::Ready(x) = a.poll(ctx) {
+                    return Poll::Ready(E2::A(x));
+                }
+            }
+            EnumProj::B(b) => {
+                if let Poll::Ready(x) = b.poll(ctx) {
+                    return Poll::Ready(E2::B(x));
+                }
+            }
+        };
+        Poll::Pending
+    }
+}
+
+macro_rules! repeat_future_state {
+    (0, $s:expr) => {
+        match $s.result() {
+            Some(res) => return res,
+            None => $s.fut().await,
+        }
+    };
+    (1, $s:expr) => {{
+        let s = repeat_future_state!(0, $s);
+        repeat_future_state!(0, s)
+    }};
+    (2, $s:expr) => {{
+        let s = repeat_future_state!(1, $s);
+        repeat_future_state!(1, s)
+    }};
+    (3, $s:expr) => {{
+        let s = repeat_future_state!(2, $s);
+        repeat_future_state!(2, s)
+    }};
+    (4, $s:expr) => {{
+        let s = repeat_future_state!(3, $s);
+        repeat_future_state!(3, s)
+    }};
+    (5, $s:expr) => {{
+        let s = repeat_future_state!(4, $s);
+        repeat_future_state!(4, s)
+    }};
+    (6, $s:expr) => {{
+        let s = repeat_future_state!(5, $s);
+        repeat_future_state!(5, s)
+    }};
+}
+
+pub trait StateItr {
+    fn fut(self) -> impl Future<Output = impl StateItr>;
+    fn result(&self) -> Option<bool>;
+
+    fn evaluate(self) -> impl Future<Output = bool>
+    where
+        Self: Sized,
+    {
+        async move {
+            let s = match self.result() {
+                Some(res) => return res,
+                None => self.fut().await,
+            };
+            match repeat_future_state!(6, s).result() {
+                Some(res) => res,
+                None => false,
+            }
+        }
+    }
+}
+
+impl<S: StateItr, F: Future<Output = S>> StateItr for F {
+    fn fut(self) -> impl Future<Output = impl StateItr> {
+        self
+    }
+    fn result(&self) -> Option<bool> {
+        None
+    }
+}
+
+impl<A: StateItr, B: StateItr> StateItr for E2<A, B> {
+    fn fut(self) -> impl Future<Output = impl StateItr> {
+        match self {
+            E2::A(a) => F2::A(a.fut()),
+            E2::B(b) => F2::B(b.fut()),
+        }
+    }
+
+    fn result(&self) -> Option<bool> {
+        match self {
+            E2::A(a) => a.result(),
+            E2::B(b) => b.result(),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ResultState(bool);
+impl StateItr for ResultState {
+    #[instrument]
+    async fn fut(self) -> impl StateItr {
+        self
+    }
+
+    fn result(&self) -> Option<bool> {
+        Some(self.0)
+    }
+}
+
+#[instrument]
+async fn state_0() -> impl StateItr {
+    ResultState(true)
+}
+
+#[instrument]
+async fn state_1() -> impl StateItr {
+    state_0()
+}
+
+#[instrument]
+async fn state_2() -> impl StateItr {
+    if true {
+        F2::A(state_1())
+    } else {
+        F2::B(state_0())
+    }
+}
+
+#[instrument]
+async fn state_3() -> impl StateItr {
+    if true {
+        F2::A(state_2())
+    } else {
+        F2::B(state_1())
+    }
+}
+
+#[instrument]
+async fn state_4() -> impl StateItr {
+    select_enum!(state_3(), state_1(), state_2(), state_0())
+}
+
+async fn test_fn() -> bool {
+    assert!(state_4().result().is_none());
+    assert!(state_4().evaluate().await);
+    true
+}
+
 // macros
+
+pub fn select<A: Future, B: Future>(a: A, b: B) -> future::Or<F2<A, B>, F2<A, B>> {
+    future::or(F2::A(a), F2::B(b))
+}
+
+#[macro_export]
+macro_rules! select_enum {
+    ($head:expr $(,)?) => { $head };
+    ($head:expr, $($tail:expr),+) => {
+        select($head, select_enum!($($tail),+))
+    };
+}
 
 #[macro_export]
 macro_rules! select {
-    ($head:expr $(,)?) => { $head };
-    ($head:expr, $($tail:tt)*) => {
-        future::or($head, select!($($tail)*))
+    ($head:expr) => { $head };
+    ($head:expr, $($tail:expr),+ $(,)?) => {
+        future::or($head, select!($($tail),+))
     };
 }
 
 #[macro_export]
 macro_rules! join {
-    ($head:expr $(,)?) => { $head };
-    ($head:expr, $($tail:tt)*) => {
-        future::zip($head, join!($($tail)*))
+    ($head:expr) => { $head };
+    ($head:expr, $($tail:expr),+ $(,)?) => {
+        future::zip($head, join!($($tail),+))
     };
 }
 
 #[macro_export]
 macro_rules! any {
-    ($($args:tt)*) => {
-        recursive_try_zip!(true, $($args)*).map(|x|x.is_ok()).not()
+    ($($args:expr),+ $(,)?) => {
+        recursive_try_zip!(true, $($args),+).map(|x|x.is_ok()).not()
     };
 }
 
 #[macro_export]
 macro_rules! all {
-    ($($args:tt)*) => {
-        recursive_try_zip!(false, $($args)*).map(|x|x.is_ok())
+    ($($args:expr),+ $(,)?) => {
+        recursive_try_zip!(false, $($args),+).map(|x|x.is_ok())
     };
 }
 
 #[macro_export]
 macro_rules! recursive_try_zip {
-    ($inv:expr, $head:expr $(,)?) => { async {($head.await ^ $inv).then_some(()).ok_or(()) } };
-    ($inv:expr, $head:expr, $($tail:tt)*) => {
-        future::try_zip(recursive_try_zip!($inv, $head), recursive_try_zip!($inv, $($tail)*))
+    ($inv:expr, $head:expr) => { async {($head.await ^ $inv).then_some(()).ok_or(()) } };
+    ($inv:expr, $head:expr, $($tail:expr),+  $(,)?) => {
+        future::try_zip(recursive_try_zip!($inv, $head), recursive_try_zip!($inv, $($tail),+))
     };
 }
 
@@ -454,5 +629,12 @@ mod tests {
 
         assert!(block_on(ctx.root()));
         tracing::debug!(?ctx);
+    }
+
+    #[test]
+    fn static_test() {
+        test_init();
+        tracing::info!("what");
+        assert!(block_on(test_fn()));
     }
 }
