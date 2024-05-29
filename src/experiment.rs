@@ -1,13 +1,4 @@
-use crate::FutureEx;
-use core::future::{pending, Future};
-use futures_lite::{future, FutureExt};
-use core::task::Poll;
-use core::pin::Pin;
 use tracing::instrument;
-use alloc::boxed::Box;
-use core::fmt::Debug;
-use alloc::rc::Rc;
-use pin_project::pin_project;
 
 struct StateFuture<T>(fn(&T) -> StateFuture<T>);
 

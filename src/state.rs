@@ -1,12 +1,11 @@
 use crate::FutureEx;
 use core::future::{pending, Future};
-use futures_lite::{future, FutureExt};
+use futures_lite::{FutureExt};
 use core::task::Poll;
 use core::pin::Pin;
 use tracing::instrument;
 use alloc::boxed::Box;
 use core::fmt::Debug;
-use alloc::rc::Rc;
 
 // State implementation
 #[derive(Debug)]
