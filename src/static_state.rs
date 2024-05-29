@@ -1,9 +1,9 @@
-use core::future::{Future};
-use futures_lite::{future, FutureExt};
-use core::task::Poll;
+use core::future::Future;
 use core::pin::Pin;
-use tracing::instrument;
+use core::task::Poll;
+use futures_lite::{future, FutureExt};
 use pin_project::pin_project;
+use tracing::instrument;
 
 pub fn select<A: Future, B: Future>(a: A, b: B) -> future::Or<F2<A, B>, F2<A, B>> {
     future::or(F2::A(a), F2::B(b))
@@ -116,19 +116,19 @@ async fn state_4() -> impl StateItr {
 #[cfg(test)]
 mod tests {
 
-use super::*;
-use core::future::ready;
-use tracing::instrument;
-use core::cell::Cell;
-use async_broadcast::{broadcast, Receiver, Sender};
-use futures_lite::future::block_on;
+    use super::*;
+    use async_broadcast::{broadcast, Receiver, Sender};
+    use core::cell::Cell;
+    use core::future::ready;
+    use futures_lite::future::block_on;
+    use tracing::instrument;
 
-use crate::tests::test_init;
+    use crate::tests::test_init;
 
-async fn test_fn() -> bool {
-    assert!(state_4().evaluate().await);
-    true
-}
+    async fn test_fn() -> bool {
+        assert!(state_4().evaluate().await);
+        true
+    }
 
     #[test]
     fn static_test() {
@@ -136,5 +136,4 @@ async fn test_fn() -> bool {
         tracing::info!("what");
         assert!(block_on(test_fn()));
     }
-
 }

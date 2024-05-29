@@ -1,11 +1,11 @@
 use crate::FutureEx;
-use core::future::{pending, Future};
-use futures_lite::{FutureExt};
-use core::task::Poll;
-use core::pin::Pin;
-use tracing::instrument;
 use alloc::boxed::Box;
 use core::fmt::Debug;
+use core::future::{pending, Future};
+use core::pin::Pin;
+use core::task::Poll;
+use futures_lite::FutureExt;
+use tracing::instrument;
 
 // State implementation
 #[derive(Debug)]
@@ -57,14 +57,17 @@ pub async fn transition(
 #[cfg(test)]
 mod tests {
 
-use super::*;
-use core::future::ready;
-use tracing::instrument;
-use core::cell::Cell;
-use async_broadcast::{broadcast, Receiver, Sender};
-use futures_lite::future::block_on;
+    use super::*;
+    use alloc::rc::Rc;
+    use async_broadcast::{broadcast, Receiver, Sender};
+    use core::cell::Cell;
+    use core::future::ready;
+    use core::future::Future;
+    use futures_lite::future::block_on;
+    use futures_lite::{future, FutureExt};
+    use tracing::instrument;
 
-use crate::tests::test_init;
+    use crate::tests::test_init;
 
     pub trait WorldModel: Clone + Debug + 'static {}
 
@@ -72,7 +75,7 @@ use crate::tests::test_init;
     pub struct SharedWorldModel(pub Rc<u8>);
     impl WorldModel for SharedWorldModel {}
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     pub struct Context<T>(Rc<T>);
 
     impl<T> Clone for Context<T> {
@@ -124,7 +127,6 @@ use crate::tests::test_init;
     pub async fn hum_a_tune(_wm: impl WorldModel, id: u8) -> bool {
         false
     }
-
 
     #[test]
     fn state_machine_test() {

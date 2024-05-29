@@ -183,14 +183,14 @@ fn what() -> impl StateFn {
 #[cfg(test)]
 mod tests {
 
-use super::*;
-use core::future::ready;
-use tracing::instrument;
-use core::cell::Cell;
-use async_broadcast::{broadcast, Receiver, Sender};
-use futures_lite::future::block_on;
+    use super::*;
+    use async_broadcast::{broadcast, Receiver, Sender};
+    use core::cell::Cell;
+    use core::future::ready;
+    use futures_lite::future::block_on;
+    use tracing::instrument;
 
-use crate::tests::test_init;
+    use crate::tests::test_init;
 
     #[test]
     fn new_test() {

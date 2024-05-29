@@ -163,9 +163,9 @@ pub async fn transition(
 }
 
 mod behavior;
+mod experiment;
 mod state;
 mod static_state;
-mod experiment;
 
 #[cfg(test)]
 mod tests {

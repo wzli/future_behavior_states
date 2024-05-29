@@ -1,16 +1,16 @@
 #[cfg(test)]
 mod tests {
 
-use core::future::ready;
-use core::future::{pending, Future};
-use futures_lite::{future, FutureExt};
-use tracing::instrument;
-use core::cell::Cell;
-use async_broadcast::{broadcast, Receiver, Sender};
-use futures_lite::future::block_on;
+    use async_broadcast::{broadcast, Receiver, Sender};
+    use core::cell::Cell;
+    use core::future::ready;
+    use core::future::{pending, Future};
+    use futures_lite::future::block_on;
+    use futures_lite::{future, FutureExt};
+    use tracing::instrument;
 
-use crate::FutureEx;
-use crate::tests::test_init;
+    use crate::tests::test_init;
+    use crate::FutureEx;
 
     #[derive(Debug, Default)]
     pub struct InnerWorldModel {
