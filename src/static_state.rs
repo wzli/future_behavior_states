@@ -5,16 +5,16 @@ use futures_lite::{future, FutureExt};
 use pin_project::pin_project;
 use tracing::instrument;
 
-pub fn select<A: Future, B: Future>(a: A, b: B) -> future::Or<F2<A, B>, F2<A, B>> {
-    future::or(F2::A(a), F2::B(b))
-}
-
 #[macro_export]
 macro_rules! select_enum {
     ($head:expr $(,)?) => { $head };
     ($head:expr, $($tail:expr),+) => {
         select($head, select_enum!($($tail),+))
     };
+}
+
+pub fn select<A: Future, B: Future>(a: A, b: B) -> future::Or<F2<A, B>, F2<A, B>> {
+    future::or(F2::A(a), F2::B(b))
 }
 
 #[pin_project(project = EnumProj)]
@@ -71,18 +71,18 @@ impl StateItr for K<bool> {
 }
 
 #[instrument]
-async fn ksuccess() -> impl StateItr {
+async fn success() -> impl StateItr {
     K(true)
 }
 
 #[instrument]
-async fn kfailure() -> impl StateItr {
+async fn failure() -> impl StateItr {
     K(false)
 }
 
 #[instrument]
 async fn state_0() -> impl StateItr {
-    ksuccess()
+    success()
 }
 
 #[instrument]
@@ -115,25 +115,14 @@ async fn state_4() -> impl StateItr {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
-    
-    
-    
-    use futures_lite::future::block_on;
-    
-
     use crate::tests::test_init;
-
-    async fn test_fn() -> bool {
-        assert!(state_4().evaluate().await);
-        true
-    }
+    use futures_lite::future::block_on;
 
     #[test]
     fn static_test() {
         test_init();
         tracing::info!("what");
-        assert!(block_on(test_fn()));
+        assert!(block_on(state_4().evaluate()));
     }
 }

@@ -59,30 +59,16 @@ mod tests {
 
     use super::*;
     use alloc::rc::Rc;
-    
-    
+
     use core::future::ready;
-    
-    
-    use futures_lite::{future};
+
+    use futures_lite::future;
     use tracing::instrument;
 
     use crate::tests::test_init;
 
-    pub trait WorldModel: Clone + Debug + 'static {}
-
-    #[derive(Debug, Default, Clone)]
-    pub struct SharedWorldModel(pub Rc<u8>);
-    impl WorldModel for SharedWorldModel {}
-
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub struct Context<T>(Rc<T>);
-
-    impl<T> Clone for Context<T> {
-        fn clone(&self) -> Self {
-            Self(self.0.clone())
-        }
-    }
 
     use core::ops::Deref;
     impl<T> Deref for Context<T> {
@@ -91,48 +77,51 @@ mod tests {
             &self.0
         }
     }
-    #[instrument(skip(wm))]
-    pub async fn state_a(wm: impl WorldModel) -> State {
-        state_b(wm.clone()).into()
-    }
 
-    #[instrument(skip(wm))]
-    pub async fn state_b(wm: impl WorldModel) -> State {
-        state_c(wm.clone()).into()
-    }
+    impl<T: 'static> Context<T> {
+        #[instrument(skip(self))]
+        pub async fn state_a(self) -> State {
+            self.state_b().into()
+        }
 
-    #[instrument(skip(wm))]
-    pub async fn state_c(wm: impl WorldModel) -> State {
-        select!(
-            transition(ready(false), None, None),
-            transition(ready(true), Some(State::Success), None),
-            transition(ready(true), Some(State::Success), None),
-            transition(ready(true), Some(State::Success), None),
-            transition_if!(ready(true).not(), State::Success),
-            transition_if!(ready(true).not(), state_c(wm.clone()).into()),
-        )
-        .await
-    }
+        #[instrument(skip(self))]
+        pub async fn state_b(self) -> State {
+            self.state_c().into()
+        }
 
-    // choose a tune to hum
-    #[instrument(skip(_wm), ret)]
-    pub async fn choose_tune(_wm: impl WorldModel) -> bool {
-        select!(ready(true), ready(true), ready(true)).await
-        // (X(hum_a_tune(wm.clone(), 2)) | X(hum_a_tune(wm, 3)) ).0.await
-        // (X(hum_a_tune(wm.clone(), 2)) | X(hum_a_tune(wm.clone(), 3)) | X(hum_a_tune(wm, 3))) .0 .await
-        //((X(hum_a_tune(wm.clone(), 2)) | X(hum_a_tune(wm, 3))) | X(hum_a_tune(wm, 4))).0.await
-    }
+        #[instrument(skip(self))]
+        pub async fn state_c(self) -> State {
+            select!(
+                transition(ready(false), None, None),
+                transition(ready(true), Some(State::Success), None),
+                transition(ready(true), Some(State::Success), None),
+                transition(ready(true), Some(State::Success), None),
+                transition_if!(ready(true).not(), State::Success),
+                transition_if!(ready(true).not(), self.state_c().into()),
+            )
+            .await
+        }
 
-    #[instrument(skip(_wm), ret)]
-    pub async fn hum_a_tune(_wm: impl WorldModel, id: u8) -> bool {
-        false
+        // choose a tune to hum
+        #[instrument(skip(self), ret)]
+        pub async fn choose_tune(self) -> bool {
+            select!(ready(true), ready(true), ready(true)).await
+            // (X(hum_a_tune(wm.clone(), 2)) | X(hum_a_tune(wm, 3)) ).0.await
+            // (X(hum_a_tune(wm.clone(), 2)) | X(hum_a_tune(wm.clone(), 3)) | X(hum_a_tune(wm, 3))) .0 .await
+            //((X(hum_a_tune(wm.clone(), 2)) | X(hum_a_tune(wm, 3))) | X(hum_a_tune(wm, 4))).0.await
+        }
+
+        #[instrument(skip(self), ret)]
+        pub async fn hum_a_tune(self, id: u8) -> bool {
+            false
+        }
     }
 
     #[test]
     fn state_machine_test() {
         test_init();
-        let wm = SharedWorldModel::default();
-        let root = State::from(state_a(wm));
+        let ctx = Context(Rc::new(0));
+        let root = State::from(ctx.state_a());
         let ret = futures_lite::future::block_on(root);
         tracing::debug!(ret);
     }

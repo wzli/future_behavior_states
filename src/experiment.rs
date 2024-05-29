@@ -184,11 +184,8 @@ fn what() -> impl StateFn {
 mod tests {
 
     use super::*;
-    
-    
-    
+
     use futures_lite::future::block_on;
-    
 
     use crate::tests::test_init;
 

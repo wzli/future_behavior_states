@@ -115,53 +115,6 @@ impl<T> Debug for dyn FutureEx<Output = T> {
     }
 }
 
-// State implementation
-#[derive(Debug)]
-pub enum State {
-    Success,
-    Failure,
-    Running(Pin<Box<dyn FutureEx<Output = State>>>),
-}
-
-impl<F: Future<Output = State> + 'static> From<F> for State {
-    fn from(f: F) -> State {
-        State::Running(Box::pin(f))
-    }
-}
-
-impl Future for State {
-    type Output = bool;
-    fn poll(mut self: Pin<&mut Self>, ctx: &mut core::task::Context<'_>) -> Poll<Self::Output> {
-        match &mut *self {
-            State::Success => Poll::Ready(true),
-            State::Failure => Poll::Ready(false),
-            State::Running(state) => {
-                if let Poll::Ready(next_state) = state.poll(ctx) {
-                    *self = next_state;
-                    ctx.waker().wake_by_ref();
-                }
-                Poll::Pending
-            }
-        }
-    }
-}
-
-#[instrument(skip(f), ret)]
-pub async fn transition(
-    f: impl Future<Output = bool>,
-    success_state: Option<State>,
-    failure_state: Option<State>,
-) -> State {
-    if f.await {
-        if let Some(state) = success_state {
-            return state;
-        }
-    } else if let Some(state) = failure_state {
-        return state;
-    }
-    pending().await
-}
-
 mod behavior;
 mod experiment;
 mod state;
@@ -170,9 +123,7 @@ mod static_state;
 #[cfg(test)]
 mod tests {
     use super::*;
-    
-    
-    
+
     use core::future::ready;
     use futures_lite::future::block_on;
 
