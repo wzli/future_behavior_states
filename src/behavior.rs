@@ -4,9 +4,9 @@ mod tests {
     use async_broadcast::{broadcast, Receiver, Sender};
     use core::cell::Cell;
     use core::future::ready;
-    use core::future::{pending, Future};
+    
     use futures_lite::future::block_on;
-    use futures_lite::{future, FutureExt};
+    use futures_lite::{future};
     use tracing::instrument;
 
     use crate::tests::test_init;
