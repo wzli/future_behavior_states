@@ -13,29 +13,217 @@ pub use tracing::instrument;
 
 use pin_project::pin_project;
 
+struct StateFuture<T>(fn(&T) -> StateFuture<T>);
+
+impl<T> StateFuture<T> {
+    async fn fut(&self, t: &T) -> Self {
+        self.0(t)
+    }
+
+    #[instrument(skip(self, t), ret)]
+    async fn evaluate(&self, t: &T) -> bool {
+        let mut state = self.fut(t).await;
+        loop {
+            if state.0 == success {
+                return true;
+            } else if state.0 == failure {
+                return false;
+            } else {
+                state = state.fut(t).await;
+            }
+        }
+        /*
+        loop {
+            match state.0 {
+                success => return true,
+                failure => return false,
+                _ => {state = state.fut(t).await; }
+            }
+        }
+
+        while state.0 != terminal_state {
+            state = state.fut(t).await;
+        }
+        let mut state = self.fut(t).await;
+        loop {
+            match  state {
+                Ok(next_state) => { state = next_state.fut(t).await; },
+                Err(result) => return result,
+            }
+        }
+        */
+    }
+}
+
+#[instrument(skip(t))]
+fn success<T>(t: &T) -> StateFuture<T> {
+    StateFuture(success)
+}
+
+#[instrument(skip(t))]
+fn failure<T>(t: &T) -> StateFuture<T> {
+    StateFuture(failure)
+}
+
+struct Ctx;
+
+impl Ctx {
+    #[instrument(skip(self))]
+    fn state_fut_0(&self) -> StateFuture<Self> {
+        StateFuture(Self::state_fut_1)
+    }
+
+    #[instrument(skip(self))]
+    fn state_fut_1(&self) -> StateFuture<Self> {
+        StateFuture(Self::state_fut_2)
+    }
+
+    #[instrument(skip(self))]
+    fn state_fut_2(&self) -> StateFuture<Self> {
+        StateFuture(success)
+        //StateFuture(Self::state_fut_0)
+    }
+}
+
+async fn new_test_fn() -> bool {
+    let ctx = Ctx;
+    ctx.state_fut_0().evaluate(&ctx).await
+
+    /*
+    for _ in 0..10 {
+        s = s.fut(&ctx).await;
+        if s.0 == Ctx::state_fut_0 {
+            break;
+        }
+    }
+    */
+}
+
+pub trait StateFn {
+    fn fut(self) -> impl StateFn;
+}
+
+trait ST<T> {
+    fn call(self) -> T;
+}
+
+struct S<T>(fn() -> T);
+
+impl<O, T: ST<O>> ST<O> for S<T> {
+    fn call(self) -> O {
+        self.0().call()
+    }
+}
+
+impl<T> StateFn for S<T>
+where
+    T: StateFn,
+{
+    fn fut(self) -> impl StateFn {
+        self.0()
+    }
+}
+
+struct X(S<S<S<S<X>>>>);
+
+struct Y<S: ST<Y<S>>>(S);
+
+struct Z(fn() -> Z);
+
+struct W(S<W>);
+
+struct W2(S<S<W2>>);
+
+impl StateFn for Z {
+    fn fut(self) -> impl StateFn {
+        self.0()
+    }
+}
+
+impl StateFn for W {
+    fn fut(self) -> impl StateFn {
+        self.0 .0()
+    }
+}
+
+impl StateFn for W2 {
+    fn fut(self) -> impl StateFn {
+        self.0 .0()
+    }
+}
+
+impl StateFn for K<bool> {
+    fn fut(self) -> impl StateFn {
+        self
+    }
+}
+
+#[instrument]
+fn state_fn_0() -> impl StateFn {
+    //W(S(state_fn_0))
+    //WA(S(state_fn_1))
+    //S(state_fn_0)
+    K(false)
+}
+/*
+
+#[instrument]
+fn state_fn_1() -> impl StateFn {
+    //S(state_fn_0)
+    //W(S(state_fn_1))
+    WB(S(state_fn_0))
+}
+
+#[instrument]
+async fn state_fn_2() -> impl StateFn {
+    state_fn_1
+}
+*/
+
+fn cycle_fn() {
+    //let x = state_fn_0.fut().fut().fut();
+    let s = S(state_fn_0);
+    let s = s.fut();
+    let s = s.fut();
+    let s = s.fut();
+
+    let s = S(state_fn_0);
+    let s = s.fut();
+    let s = s.fut();
+    let s = s.fut();
+}
+
+/*
+struct X;
+impl StateFn for X {
+    type A = ();
+}
+
+fn what() -> impl StateFn {
+    X
+}
+*/
+
 #[pin_project(project = EnumProj)]
 pub enum F2<A, B> {
     A(#[pin] A),
     B(#[pin] B),
 }
 
-pub enum E2<A, B> {
-    A(A),
-    B(B),
-}
+pub struct K<T>(T);
 
 impl<A: Future, B: Future> Future for F2<A, B> {
-    type Output = E2<A::Output, B::Output>;
+    type Output = K<F2<A::Output, B::Output>>;
     fn poll(self: Pin<&mut Self>, ctx: &mut core::task::Context<'_>) -> Poll<Self::Output> {
         match self.project() {
             EnumProj::A(a) => {
                 if let Poll::Ready(x) = a.poll(ctx) {
-                    return Poll::Ready(E2::A(x));
+                    return Poll::Ready(K(F2::A(x)));
                 }
             }
             EnumProj::B(b) => {
                 if let Poll::Ready(x) = b.poll(ctx) {
-                    return Poll::Ready(E2::B(x));
+                    return Poll::Ready(K(F2::B(x)));
                 }
             }
         };
@@ -43,101 +231,45 @@ impl<A: Future, B: Future> Future for F2<A, B> {
     }
 }
 
-macro_rules! repeat_future_state {
-    (0, $s:expr) => {
-        match $s.result() {
-            Some(res) => return res,
-            None => $s.fut().await,
-        }
-    };
-    (1, $s:expr) => {{
-        let s = repeat_future_state!(0, $s);
-        repeat_future_state!(0, s)
-    }};
-    (2, $s:expr) => {{
-        let s = repeat_future_state!(1, $s);
-        repeat_future_state!(1, s)
-    }};
-    (3, $s:expr) => {{
-        let s = repeat_future_state!(2, $s);
-        repeat_future_state!(2, s)
-    }};
-    (4, $s:expr) => {{
-        let s = repeat_future_state!(3, $s);
-        repeat_future_state!(3, s)
-    }};
-    (5, $s:expr) => {{
-        let s = repeat_future_state!(4, $s);
-        repeat_future_state!(4, s)
-    }};
-    (6, $s:expr) => {{
-        let s = repeat_future_state!(5, $s);
-        repeat_future_state!(5, s)
-    }};
-}
-
 pub trait StateItr {
-    fn fut(self) -> impl Future<Output = impl StateItr>;
-    fn result(&self) -> Option<bool>;
-
-    fn evaluate(self) -> impl Future<Output = bool>
-    where
-        Self: Sized,
-    {
-        async move {
-            let s = match self.result() {
-                Some(res) => return res,
-                None => self.fut().await,
-            };
-            match repeat_future_state!(6, s).result() {
-                Some(res) => res,
-                None => false,
-            }
-        }
-    }
+    fn evaluate(self) -> impl Future<Output = bool>;
 }
 
 impl<S: StateItr, F: Future<Output = S>> StateItr for F {
-    fn fut(self) -> impl Future<Output = impl StateItr> {
-        self
-    }
-    fn result(&self) -> Option<bool> {
-        None
+    async fn evaluate(self) -> bool {
+        self.await.evaluate().await
     }
 }
 
-impl<A: StateItr, B: StateItr> StateItr for E2<A, B> {
-    fn fut(self) -> impl Future<Output = impl StateItr> {
-        match self {
-            E2::A(a) => F2::A(a.fut()),
-            E2::B(b) => F2::B(b.fut()),
-        }
-    }
-
-    fn result(&self) -> Option<bool> {
-        match self {
-            E2::A(a) => a.result(),
-            E2::B(b) => b.result(),
+// State implementation
+impl<A: StateItr, B: StateItr> StateItr for K<F2<A, B>> {
+    async fn evaluate(self) -> bool {
+        match self.0 {
+            F2::A(a) => a.evaluate().await,
+            F2::B(b) => b.evaluate().await,
         }
     }
 }
 
-#[derive(Debug)]
-struct ResultState(bool);
-impl StateItr for ResultState {
-    #[instrument]
-    async fn fut(self) -> impl StateItr {
-        self
-    }
-
-    fn result(&self) -> Option<bool> {
-        Some(self.0)
+impl StateItr for K<bool> {
+    async fn evaluate(self) -> bool {
+        self.0
     }
 }
 
 #[instrument]
+async fn ksuccess() -> impl StateItr {
+    K(true)
+}
+
+#[instrument]
+async fn kfailure() -> impl StateItr {
+    K(false)
+}
+
+#[instrument]
 async fn state_0() -> impl StateItr {
-    ResultState(true)
+    ksuccess()
 }
 
 #[instrument]
@@ -165,11 +297,10 @@ async fn state_3() -> impl StateItr {
 
 #[instrument]
 async fn state_4() -> impl StateItr {
-    select_enum!(state_3(), state_1(), state_2(), state_0())
+    select_enum!(state_3(), state_1(), state_2(), state_0()).await
 }
 
 async fn test_fn() -> bool {
-    assert!(state_4().result().is_none());
     assert!(state_4().evaluate().await);
     true
 }
@@ -636,5 +767,18 @@ mod tests {
         test_init();
         tracing::info!("what");
         assert!(block_on(test_fn()));
+    }
+
+    #[test]
+    fn cycle_test() {
+        test_init();
+        cycle_fn();
+    }
+
+    #[test]
+    fn new_test() {
+        test_init();
+        tracing::info!("what");
+        assert!(block_on(new_test_fn()));
     }
 }
