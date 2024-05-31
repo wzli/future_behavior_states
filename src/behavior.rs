@@ -1,5 +1,7 @@
 use alloc::boxed::Box;
-use core::{any::Any, future::Future};
+use core::any::Any};
+
+pub use core::future::Future;
 
 #[macro_export]
 macro_rules! any {

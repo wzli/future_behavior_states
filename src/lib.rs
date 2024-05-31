@@ -1,14 +1,12 @@
-#![no_std]
 #![allow(clippy::async_yields_async)]
+#![no_std]
+
 extern crate alloc;
 
-use core::future::Future;
+pub use tracing::instrument;
 
 pub use behavior::*;
 pub use state::*;
-
-pub use futures_lite::future;
-pub use tracing::instrument;
 
 #[macro_export]
 macro_rules! select {
