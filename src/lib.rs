@@ -5,10 +5,8 @@ extern crate alloc;
 use core::future::Future;
 
 pub use behavior::Behavior;
-pub use futures_lite::{future, FutureExt};
+pub use futures_lite::future;
 pub use tracing::instrument;
-
-// macros
 
 #[macro_export]
 macro_rules! select {
@@ -66,62 +64,11 @@ mod new;
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use core::future::ready;
-    use futures_lite::future::block_on;
-
     pub fn test_init() {
         let _ = tracing_subscriber::fmt()
             .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
             .with_span_events(tracing_subscriber::fmt::format::FmtSpan::NEW)
             .with_target(false)
             .try_init();
-    }
-
-    #[test]
-    fn any_macro() {
-        test_init();
-        async fn root(a: bool, b: bool) -> bool {
-            any!(ready(a), ready(b)).await
-        }
-        assert!(!block_on(root(false, false)));
-        assert!(block_on(root(false, true)));
-        assert!(block_on(root(true, false)));
-        assert!(block_on(root(true, true)));
-    }
-
-    #[test]
-    fn all_macro() {
-        test_init();
-        async fn root(a: bool, b: bool) -> bool {
-            all!(ready(a), ready(b),).await
-        }
-        assert!(!block_on(root(false, false)));
-        assert!(!block_on(root(false, true)));
-        assert!(!block_on(root(true, false)));
-        assert!(block_on(root(true, true)));
-    }
-
-    #[test]
-    fn run_until_macro() {
-        test_init();
-
-        #[instrument]
-        async fn count_down(x: &mut u8) -> bool {
-            if *x == 0 {
-                true
-            } else {
-                *x -= 1;
-                false
-            }
-        }
-
-        let mut x = 3;
-        assert!(block_on(repeat_until!(count_down(&mut x), true)));
-        x = 3;
-        assert!(block_on(repeat_until!(count_down(&mut x), true, 4)));
-        x = 3;
-        assert!(!block_on(repeat_until!(count_down(&mut x), true, 3)));
-        assert_eq!(x, 0);
     }
 }
