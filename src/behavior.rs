@@ -1,5 +1,5 @@
 use alloc::boxed::Box;
-use core::any::Any};
+use core::any::Any;
 
 pub use core::future::Future;
 
