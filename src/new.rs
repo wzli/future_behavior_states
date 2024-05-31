@@ -102,7 +102,7 @@ impl<A: Future, B: Future> Future for F2<A, B> {
 
 impl<O, A: Future<Output = O>, B: Future<Output = O>> Future for F<F2<A, B>> {
     type Output = O;
-    fn poll(mut self: Pin<&mut Self>, ctx: &mut core::task::Context<'_>) -> Poll<O> {
+    fn poll(self: Pin<&mut Self>, ctx: &mut core::task::Context<'_>) -> Poll<O> {
         {
             match self.project().0.project() {
                 F2Proj::A(a) => a.poll(ctx),

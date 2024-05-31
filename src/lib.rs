@@ -1,12 +1,9 @@
 #![no_std]
 #![allow(clippy::async_yields_async)]
 extern crate alloc;
-use alloc::boxed::Box;
 
 use core::fmt::Debug;
-use core::future::{pending, Future};
-use core::pin::Pin;
-use core::task::Poll;
+use core::future::Future;
 
 pub use futures_lite::{future, FutureExt};
 pub use tracing::instrument;
