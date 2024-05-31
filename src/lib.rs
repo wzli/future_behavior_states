@@ -2,14 +2,14 @@
 #![allow(clippy::async_yields_async)]
 extern crate alloc;
 
+use alloc::boxed::Box;
+use core::any::Any;
 use core::fmt::Debug;
 use core::future::Future;
-use core::any::Any;
-use alloc::boxed::Box;
 
+pub use behavior::Behavior;
 pub use futures_lite::{future, FutureExt};
 pub use tracing::instrument;
-pub use behavior::Behavior;
 
 // macros
 
@@ -41,7 +41,6 @@ pub trait FutureEx: Future {
     {
         async { f(self.await) }
     }
-
 }
 
 impl<F: Future> FutureEx for F {}
@@ -65,9 +64,6 @@ impl<T> Debug for dyn FutureEx<Output = T> {
 */
 
 mod behavior;
-//mod experiment;
-//mod state;
-//mod static_state;
 mod new;
 
 #[cfg(test)]

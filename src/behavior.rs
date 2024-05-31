@@ -1,7 +1,7 @@
+use alloc::boxed::Box;
+use core::any::Any;
 use core::fmt::Debug;
 use core::future::Future;
-use core::any::Any;
-use alloc::boxed::Box;
 
 #[macro_export]
 macro_rules! any {
@@ -44,8 +44,12 @@ macro_rules! repeat_until {
 }
 
 pub trait Behavior: Future<Output = bool> {
-    fn as_any(&self) -> &dyn Any where Self: 'static;
-    fn as_box_any(self: Box<Self>) -> Box<dyn Any> where Self: 'static;
+    fn as_any(&self) -> &dyn Any
+    where
+        Self: 'static;
+    fn as_box_any(self: Box<Self>) -> Box<dyn Any>
+    where
+        Self: 'static;
 
     fn not(self) -> impl Future<Output = bool>
     where
@@ -56,10 +60,16 @@ pub trait Behavior: Future<Output = bool> {
 }
 
 impl<F: Future<Output = bool>> Behavior for F {
-    fn as_any(&self) -> &dyn Any where Self: 'static {
+    fn as_any(&self) -> &dyn Any
+    where
+        Self: 'static,
+    {
         self
     }
-    fn as_box_any(self: Box<Self>) -> Box<dyn Any> where Self: 'static {
+    fn as_box_any(self: Box<Self>) -> Box<dyn Any>
+    where
+        Self: 'static,
+    {
         self
     }
 }
@@ -76,8 +86,8 @@ mod tests {
     use tracing::instrument;
 
     use crate::tests::test_init;
-    use crate::FutureEx;
     use crate::Behavior;
+    use crate::FutureEx;
 
     #[derive(Debug, Default)]
     pub struct InnerWorldModel {

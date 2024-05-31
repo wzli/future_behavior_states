@@ -1,6 +1,7 @@
 use crate::repeat_until;
 use crate::Behavior;
 use crate::FutureEx;
+use alloc::boxed::Box;
 use core::future::ready;
 use core::future::Future;
 use core::pin::pin;
@@ -10,7 +11,6 @@ use futures_lite::future::pending;
 use futures_lite::{future, FutureExt};
 use pin_project::pin_project;
 use tracing::instrument;
-use alloc::boxed::Box;
 
 pub struct DynBehavior(Pin<Box<dyn Future<Output = Pin<Box<dyn Behavior + Unpin>>>>>);
 
