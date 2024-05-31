@@ -1,4 +1,3 @@
-use futures_lite::{future, FutureExt};
 use pin_project::pin_project;
 use tracing::instrument;
 
@@ -7,10 +6,10 @@ use core::future::{ready, Future};
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use crate::repeat_until;
-use crate::Behavior;
+use crate::*;
 
-pub struct DynBehavior(Pin<Box<dyn Future<Output = Pin<Box<dyn Behavior + Unpin>>>>>);
+pub struct DynBehavior(Pin<Box<dyn Future<Output = InnerBehavior>>>);
+type InnerBehavior = Pin<Box<dyn Behavior + Unpin>>;
 
 impl Future for DynBehavior {
     type Output = bool;
@@ -38,9 +37,7 @@ impl<S: Behavior + Unpin + 'static, F: Future<Output = S>> DynWait for F {
     where
         Self: Sized + 'static,
     {
-        DynBehavior(Box::pin(async {
-            Box::pin(self.await) as Pin<Box<dyn Behavior + Unpin>>
-        }))
+        DynBehavior(Box::pin(async { Box::pin(self.await) as InnerBehavior }))
     }
 }
 

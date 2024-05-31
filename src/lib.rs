@@ -1,8 +1,10 @@
-#![allow(clippy::async_yields_async)]
 #![no_std]
+#![allow(clippy::async_yields_async)]
 
 extern crate alloc;
 
+pub use core::future::Future;
+pub use futures_lite::{future, FutureExt};
 pub use tracing::instrument;
 
 pub use behavior::*;
