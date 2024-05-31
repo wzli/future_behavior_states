@@ -1,14 +1,25 @@
+use alloc::boxed::Box;
 use core::future::Future;
 use core::pin::Pin;
 use core::task::Poll;
 use futures_lite::{future, FutureExt};
 use pin_project::pin_project;
 use tracing::instrument;
+use futures_lite::future::pending;
+use core::future::ready;
+use crate::FutureEx;
+
+#[macro_export]
+macro_rules! transition_iff {
+    ($f:expr, $s:expr $(,)?) => {
+        transition(repeat_until!($f, true), Some($s), None::<Pin<Box<dyn Future<Output=StateDyn>>>>)
+    };
+}
 
 #[macro_export]
 macro_rules! select_enum {
-    ($head:expr $(,)?) => { $head };
-    ($head:expr, $($tail:expr),+) => {
+    ($head:expr) => { $head };
+    ($head:expr, $($tail:expr),+ $(,)?) => {
         select($head, select_enum!($($tail),+))
     };
 }
@@ -43,14 +54,52 @@ impl<A: Future, B: Future> Future for F2<A, B> {
         Poll::Pending
     }
 }
+use core::any::Any;
 
 pub trait StateItr {
     fn evaluate(self) -> impl Future<Output = bool>;
 }
 
+pub trait DynStateItr {
+    fn eval(&mut self) -> Pin<Box<dyn Future<Output = bool> + '_>>;
+    fn as_any(&mut self) -> &mut dyn Any;
+}
+
+struct StateDyn(Box<dyn DynStateItr>);
+
+impl StateItr for K<bool> {
+    async fn evaluate(self) -> bool {
+        self.0
+    }
+}
+
+
 impl<S: StateItr, F: Future<Output = S>> StateItr for F {
     async fn evaluate(self) -> bool {
         self.await.evaluate().await
+    }
+}
+
+impl StateItr for StateDyn {
+    async fn evaluate(mut self) -> bool {
+        // maybe can loop here instead of recursion?
+        // compare type id of dyn DynStateItr to see it it matches success or failure
+        self.0.eval().await
+    }
+}
+
+impl<S: StateItr, F: Future<Output = S> + 'static> DynStateItr for Option<F> {
+    fn eval(&mut self) -> Pin<Box<dyn Future<Output = bool> + '_>> {
+        Box::pin( async{
+            if let Some(x) = core::mem::take(self) {
+                x.await.evaluate().await
+            } else {
+                false
+            }
+        })
+    }
+    fn as_any(&mut self) -> &mut dyn Any {
+        self
     }
 }
 
@@ -64,10 +113,37 @@ impl<A: StateItr, B: StateItr> StateItr for K<F2<A, B>> {
     }
 }
 
-impl StateItr for K<bool> {
-    async fn evaluate(self) -> bool {
-        self.0
+pub async fn transition<A: StateItr, B: StateItr>(
+    f: impl Future<Output = bool>,
+    success_state: Option<A>,
+    failure_state: Option<B>,
+) -> K<F2<A, B>> {
+    if f.await {
+        if let Some(state) = success_state {
+            return K(F2::A(state));
+        }
+    } else if let Some(state) = failure_state {
+        return K(F2::B(state));
     }
+    pending().await
+}
+
+#[instrument]
+async fn dstate_a() -> StateDyn {
+    //Box::new(StateDyn::from(dstate_a()))
+    //Box::new(Some(dstate1()))
+    StateDyn(Box::new(Some(dstate_a())))
+    //StateDyn(Box::new(Some(success())))
+}
+
+#[instrument]
+async fn dstate1() -> impl StateItr {
+    dstate_a()
+}
+
+#[instrument]
+async fn dstate2() -> impl StateItr {
+    dstate1()
 }
 
 #[instrument]
@@ -79,6 +155,16 @@ async fn success() -> impl StateItr {
 async fn failure() -> impl StateItr {
     K(false)
 }
+
+/*
+#[instrument]
+async fn dstate0() -> StateDyn {
+    select!(success(), success(),
+        //transition(ready(true), Some(success()), Some(success())).map(Into::into),
+        //transition_iff!(ready(true), success()).map(Into::into),
+    ).await
+}
+
 
 #[instrument]
 async fn state_0() -> impl StateItr {
@@ -110,8 +196,11 @@ async fn state_3() -> impl StateItr {
 
 #[instrument]
 async fn state_4() -> impl StateItr {
-    select_enum!(state_3(), state_1(), state_2(), state_0()).await
+    select_enum!(state_3(), state_1(), state_2(), state_0(),
+        //transition_iff!(ready(true), success())
+    ).await
 }
+*/
 
 #[cfg(test)]
 mod tests {
@@ -119,10 +208,17 @@ mod tests {
     use crate::tests::test_init;
     use futures_lite::future::block_on;
 
+    /*
     #[test]
     fn static_test() {
         test_init();
-        tracing::info!("what");
         assert!(block_on(state_4().evaluate()));
+    }
+    */
+
+    #[test]
+    fn dyn_test() {
+        test_init();
+        assert!(block_on(async {dstate_a().await.0.eval().await }));
     }
 }
