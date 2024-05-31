@@ -3,7 +3,7 @@
 
 extern crate alloc;
 
-pub use core::future::Future;
+pub use core::future::{ready, Future};
 pub use futures_lite::{future, FutureExt};
 pub use tracing::instrument;
 
@@ -27,10 +27,12 @@ macro_rules! join {
 }
 
 // Future trait extensions
-pub trait FutureEx: Future {
+pub trait FutureMap: Future {
+    /*
     fn type_name(&self) -> &'static str {
         core::any::type_name::<Self>()
     }
+    */
 
     fn map<O>(self, f: impl FnOnce(<Self as Future>::Output) -> O) -> impl Future<Output = O>
     where
@@ -40,7 +42,7 @@ pub trait FutureEx: Future {
     }
 }
 
-impl<F: Future> FutureEx for F {}
+impl<F: Future> FutureMap for F {}
 
 /*
 impl<T> Debug for dyn FutureEx<Output = T> {
@@ -65,12 +67,6 @@ mod state;
 
 #[cfg(test)]
 mod tests {
-
-    pub fn test_init() {
-        let _ = tracing_subscriber::fmt()
-            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-            .with_span_events(tracing_subscriber::fmt::format::FmtSpan::NEW)
-            .with_target(false)
-            .try_init();
-    }
+    //use super::*;
+    //use futures_lite::future::block_on;
 }

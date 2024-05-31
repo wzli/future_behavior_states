@@ -3,6 +3,8 @@ use core::any::Any;
 
 use crate::*;
 
+// TODO: implement reactive sequences
+
 #[macro_export]
 macro_rules! any {
     ($($args:expr),+ $(,)?) => {
@@ -77,7 +79,6 @@ impl<F: Future<Output = bool>> Behavior for F {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core::future::ready;
     use futures_lite::future::block_on;
 
     #[test]
