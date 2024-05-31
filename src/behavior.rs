@@ -73,6 +73,16 @@ pub trait Behavior: Future<Output = bool> {
     {
         async { !self.await }
     }
+
+    fn force(self, val: bool) -> impl Future<Output = bool>
+    where
+        Self: Sized,
+    {
+        async move {
+            self.await;
+            val
+        }
+    }
 }
 
 impl<F: Future<Output = bool>> Behavior for F {
