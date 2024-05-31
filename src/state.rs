@@ -3,9 +3,9 @@ use pin_project::pin_project;
 use tracing::instrument;
 
 use alloc::boxed::Box;
-use core::future::{Future, ready};
+use core::future::{ready, Future};
 use core::pin::Pin;
-use core::task::{Poll, Context};
+use core::task::{Context, Poll};
 
 use crate::repeat_until;
 use crate::Behavior;
