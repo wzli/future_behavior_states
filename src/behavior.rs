@@ -1,6 +1,7 @@
+use futures_lite::future;
 use alloc::boxed::Box;
-use core::any::Any;
-use core::future::Future;
+use core::{any::Any, future::Future};
+use crate::FutureEx;
 
 #[macro_export]
 macro_rules! any {
@@ -75,18 +76,9 @@ impl<F: Future<Output = bool>> Behavior for F {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
-
     use core::future::ready;
     use futures_lite::future::block_on;
-
-    use core::future::Future;
-
-    pub use crate::Behavior;
-    use crate::FutureEx;
-    pub use futures_lite::future;
-    pub use tracing::instrument;
 
     #[test]
     fn any_macro() {

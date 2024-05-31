@@ -5,6 +5,7 @@ extern crate alloc;
 use core::future::Future;
 
 pub use behavior::Behavior;
+
 pub use futures_lite::future;
 pub use tracing::instrument;
 
@@ -59,11 +60,11 @@ impl<T> Debug for dyn FutureEx<Output = T> {
 */
 
 mod behavior;
-mod new;
+mod state;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+
     pub fn test_init() {
         let _ = tracing_subscriber::fmt()
             .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())

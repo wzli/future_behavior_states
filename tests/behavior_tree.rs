@@ -17,7 +17,7 @@ pub fn test_init() {
 }
 
 #[derive(Debug, Default)]
-pub struct InnerWorldModel {
+pub struct Context {
     pub enemy_near: Cell<bool>,
     pub moved_to_enemy: Cell<bool>,
     pub attacked: Cell<bool>,
@@ -28,7 +28,7 @@ pub struct InnerWorldModel {
     pub topic: Option<(Sender<u32>, Receiver<u32>)>,
 }
 
-impl InnerWorldModel {
+impl Context {
     #[instrument(skip(self), ret)]
     pub async fn root(&self) -> bool {
         let (tx, mut rx) = self.topic.clone().unwrap();
@@ -136,7 +136,7 @@ fn behaviour_tree_test() {
 
     let topic = Some(broadcast::<u32>(2));
 
-    let ctx = InnerWorldModel {
+    let ctx = Context {
         topic,
         ..Default::default()
     };

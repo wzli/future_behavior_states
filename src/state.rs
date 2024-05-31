@@ -1,15 +1,14 @@
-use crate::repeat_until;
-use crate::Behavior;
-use alloc::boxed::Box;
-use core::future::ready;
-use core::future::Future;
-use core::pin::pin;
-use core::pin::Pin;
-use core::task::Poll;
-use futures_lite::future::pending;
 use futures_lite::{future, FutureExt};
 use pin_project::pin_project;
 use tracing::instrument;
+
+use alloc::boxed::Box;
+use core::future::{Future, ready};
+use core::pin::Pin;
+use core::task::{Poll, Context};
+
+use crate::repeat_until;
+use crate::Behavior;
 
 pub struct DynBehavior(Pin<Box<dyn Future<Output = Pin<Box<dyn Behavior + Unpin>>>>>);
 
@@ -116,7 +115,7 @@ pub async fn check_transition_once(
     if behavior.await {
         next_state.await
     } else {
-        pending().await
+        future::pending().await
     }
 }
 
