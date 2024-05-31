@@ -1,6 +1,5 @@
 use alloc::boxed::Box;
 use core::any::Any;
-use core::fmt::Debug;
 use core::future::Future;
 
 #[macro_export]

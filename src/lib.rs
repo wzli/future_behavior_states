@@ -2,9 +2,6 @@
 #![allow(clippy::async_yields_async)]
 extern crate alloc;
 
-use alloc::boxed::Box;
-use core::any::Any;
-use core::fmt::Debug;
 use core::future::Future;
 
 pub use behavior::Behavior;

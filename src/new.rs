@@ -1,6 +1,5 @@
 use crate::repeat_until;
 use crate::Behavior;
-use crate::FutureEx;
 use alloc::boxed::Box;
 use core::future::ready;
 use core::future::Future;
