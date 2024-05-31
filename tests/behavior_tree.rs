@@ -38,12 +38,12 @@ impl Context {
 
     // choose a tune to hum
     pub async fn choose_tune(&self) -> bool {
-        any!(self.hum_a_tune(2), self.hum_a_tune(1)).await
+        parallel_any!(self.hum_a_tune(2), self.hum_a_tune(1)).await
     }
 
     pub async fn choose_tune2(&self) -> bool {
         //try_zip!(ready(true), ready(true)).await
-        all!(ready(true), ready(true)).await
+        parallel_all!(ready(true), ready(true)).await
     }
 
     #[instrument(skip(self), ret)]

@@ -3,17 +3,15 @@ use core::any::Any;
 
 use crate::*;
 
-// TODO: implement reactive sequences
-
 #[macro_export]
-macro_rules! any {
+macro_rules! parallel_any {
     ($($args:expr),+ $(,)?) => {
         recursive_try_zip!(true, $($args),+).map(|x|x.is_ok()).not()
     };
 }
 
 #[macro_export]
-macro_rules! all {
+macro_rules! parallel_all {
     ($($args:expr),+ $(,)?) => {
         recursive_try_zip!(false, $($args),+).map(|x|x.is_ok())
     };
@@ -24,6 +22,22 @@ macro_rules! recursive_try_zip {
     ($inv:expr, $head:expr) => { async {($head.await ^ $inv).then_some(()).ok_or(()) } };
     ($inv:expr, $head:expr, $($tail:expr),+  $(,)?) => {
         future::try_zip(recursive_try_zip!($inv, $head), recursive_try_zip!($inv, $($tail),+))
+    };
+}
+
+#[macro_export]
+macro_rules! reactive_sequence {
+    ($x:expr) => { $x };
+    ($x:expr, $($rest:expr),+ $(,)?) => {
+        async { $x.await && parallel_all!($x, $($rest),+).await }
+    };
+}
+
+#[macro_export]
+macro_rules! reactive_selector {
+    ($x:expr) => { $x };
+    ($x:expr, $($rest:expr),+ $(,)?) => {
+        async { $x.await || parallel_any!($x, $($rest),+).await }
     };
 }
 
@@ -82,9 +96,9 @@ mod tests {
     use futures_lite::future::block_on;
 
     #[test]
-    fn any_macro() {
+    fn parallel_any_macro() {
         async fn root(a: bool, b: bool) -> bool {
-            any!(ready(a), ready(b)).await
+            parallel_any!(ready(a), ready(b)).await
         }
         assert!(!block_on(root(false, false)));
         assert!(block_on(root(false, true)));
@@ -93,13 +107,35 @@ mod tests {
     }
 
     #[test]
-    fn all_macro() {
+    fn parallel_all_macro() {
         async fn root(a: bool, b: bool) -> bool {
-            all!(ready(a), ready(b),).await
+            parallel_all!(ready(a), ready(b),).await
         }
         assert!(!block_on(root(false, false)));
         assert!(!block_on(root(false, true)));
         assert!(!block_on(root(true, false)));
+        assert!(block_on(root(true, true)));
+    }
+
+    #[test]
+    fn reactive_sequence_macro() {
+        async fn root(a: bool, b: bool) -> bool {
+            reactive_sequence!(ready(a), ready(b),).await
+        }
+        assert!(!block_on(root(false, false)));
+        assert!(!block_on(root(false, true)));
+        assert!(!block_on(root(true, false)));
+        assert!(block_on(root(true, true)));
+    }
+
+    #[test]
+    fn reactive_selector_macro() {
+        async fn root(a: bool, b: bool) -> bool {
+            reactive_selector!(ready(a), ready(b)).await
+        }
+        assert!(!block_on(root(false, false)));
+        assert!(block_on(root(false, true)));
+        assert!(block_on(root(true, false)));
         assert!(block_on(root(true, true)));
     }
 
