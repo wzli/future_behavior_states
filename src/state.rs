@@ -14,7 +14,7 @@ pub struct DynBehavior(Pin<Box<dyn Future<Output = Pin<Box<dyn Behavior + Unpin>
 
 impl Future for DynBehavior {
     type Output = bool;
-    fn poll(mut self: Pin<&mut Self>, ctx: &mut core::task::Context<'_>) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
         if let Poll::Ready(mut state) = self.0.poll(ctx) {
             if (*state).as_any().downcast_ref::<Self>().is_none() {
                 return state.poll(ctx);
@@ -67,7 +67,7 @@ pub struct F<T>(#[pin] T);
 
 impl<A: Future, B: Future> Future for F2<A, B> {
     type Output = F<F2<A::Output, B::Output>>;
-    fn poll(self: Pin<&mut Self>, ctx: &mut core::task::Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
             F2Proj::A(a) => {
                 if let Poll::Ready(x) = a.poll(ctx) {
@@ -86,7 +86,7 @@ impl<A: Future, B: Future> Future for F2<A, B> {
 
 impl<O, A: Future<Output = O>, B: Future<Output = O>> Future for F<F2<A, B>> {
     type Output = O;
-    fn poll(self: Pin<&mut Self>, ctx: &mut core::task::Context<'_>) -> Poll<O> {
+    fn poll(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<O> {
         {
             match self.project().0.project() {
                 F2Proj::A(a) => a.poll(ctx),
@@ -148,7 +148,6 @@ async fn state1() -> impl Behavior {
 
 #[instrument]
 async fn state2() -> impl Behavior {
-    let x = success().await.await;
     select_state!(
         transition!(failure().await.not(), failure()),
         success(),

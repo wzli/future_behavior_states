@@ -1,7 +1,5 @@
-use crate::FutureEx;
 use alloc::boxed::Box;
 use core::{any::Any, future::Future};
-use futures_lite::future;
 
 #[macro_export]
 macro_rules! any {

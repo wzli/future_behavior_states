@@ -4,7 +4,8 @@ extern crate alloc;
 
 use core::future::Future;
 
-pub use behavior::Behavior;
+pub use behavior::*;
+pub use state::*;
 
 pub use futures_lite::future;
 pub use tracing::instrument;
