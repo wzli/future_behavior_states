@@ -4,9 +4,12 @@ extern crate alloc;
 
 use core::fmt::Debug;
 use core::future::Future;
+use core::any::Any;
+use alloc::boxed::Box;
 
 pub use futures_lite::{future, FutureExt};
 pub use tracing::instrument;
+pub use behavior::Behavior;
 
 // macros
 
@@ -26,53 +29,6 @@ macro_rules! join {
     };
 }
 
-#[macro_export]
-macro_rules! any {
-    ($($args:expr),+ $(,)?) => {
-        recursive_try_zip!(true, $($args),+).map(|x|x.is_ok()).not()
-    };
-}
-
-#[macro_export]
-macro_rules! all {
-    ($($args:expr),+ $(,)?) => {
-        recursive_try_zip!(false, $($args),+).map(|x|x.is_ok())
-    };
-}
-
-#[macro_export]
-macro_rules! recursive_try_zip {
-    ($inv:expr, $head:expr) => { async {($head.await ^ $inv).then_some(()).ok_or(()) } };
-    ($inv:expr, $head:expr, $($tail:expr),+  $(,)?) => {
-        future::try_zip(recursive_try_zip!($inv, $head), recursive_try_zip!($inv, $($tail),+))
-    };
-}
-
-#[macro_export]
-macro_rules! repeat_until {
-    ($f:expr, $until:expr $(,)?) => {
-        repeat_until!($f, $until, usize::MAX)
-    };
-    ($f:expr, $until:expr, $n:expr $(,)?) => {
-        async {
-            for _ in 0..$n {
-                if $f.await ^ !$until {
-                    return true;
-                }
-                future::yield_now().await
-            }
-            false
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! transition_if {
-    ($f:expr, $s:expr $(,)?) => {
-        transition(repeat_until!($f, true), Some($s), None)
-    };
-}
-
 // Future trait extensions
 pub trait FutureEx: Future {
     fn type_name(&self) -> &'static str {
@@ -86,16 +42,11 @@ pub trait FutureEx: Future {
         async { f(self.await) }
     }
 
-    fn not(self) -> impl Future<Output = bool>
-    where
-        Self: Future<Output = bool> + Sized,
-    {
-        async { !self.await }
-    }
 }
 
-impl<T, F: Future<Output = T>> FutureEx for F {}
+impl<F: Future> FutureEx for F {}
 
+/*
 impl<T> Debug for dyn FutureEx<Output = T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let s = self.type_name();
@@ -111,6 +62,7 @@ impl<T> Debug for dyn FutureEx<Output = T> {
         Ok(())
     }
 }
+*/
 
 mod behavior;
 //mod experiment;

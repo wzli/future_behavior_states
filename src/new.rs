@@ -1,7 +1,6 @@
 use crate::repeat_until;
+use crate::Behavior;
 use crate::FutureEx;
-use alloc::boxed::Box;
-use core::any::Any;
 use core::future::ready;
 use core::future::Future;
 use core::pin::pin;
@@ -11,24 +10,11 @@ use futures_lite::future::pending;
 use futures_lite::{future, FutureExt};
 use pin_project::pin_project;
 use tracing::instrument;
+use alloc::boxed::Box;
 
-pub trait State: Future<Output = bool> {
-    fn as_any(&self) -> &dyn Any;
-    fn as_box_any(self: Box<Self>) -> Box<dyn Any>;
-}
+pub struct DynBehavior(Pin<Box<dyn Future<Output = Pin<Box<dyn Behavior + Unpin>>>>>);
 
-impl<F: Future<Output = bool> + 'static> State for F {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_box_any(self: Box<Self>) -> Box<dyn Any> {
-        self
-    }
-}
-
-pub struct DynState(Pin<Box<dyn Future<Output = Pin<Box<dyn State + Unpin>>>>>);
-
-impl Future for DynState {
+impl Future for DynBehavior {
     type Output = bool;
     fn poll(mut self: Pin<&mut Self>, ctx: &mut core::task::Context<'_>) -> Poll<Self::Output> {
         if let Poll::Ready(mut state) = self.0.poll(ctx) {
@@ -44,18 +30,18 @@ impl Future for DynState {
 }
 
 pub trait DynWait {
-    fn dwait(self) -> DynState
+    fn dwait(self) -> DynBehavior
     where
         Self: Sized + 'static;
 }
 
-impl<S: State + Unpin + 'static, F: Future<Output = S>> DynWait for F {
-    fn dwait(self) -> DynState
+impl<S: Behavior + Unpin + 'static, F: Future<Output = S>> DynWait for F {
+    fn dwait(self) -> DynBehavior
     where
         Self: Sized + 'static,
     {
-        DynState(Box::pin(async {
-            Box::pin(self.await) as Pin<Box<dyn State + Unpin>>
+        DynBehavior(Box::pin(async {
+            Box::pin(self.await) as Pin<Box<dyn Behavior + Unpin>>
         }))
     }
 }
@@ -113,10 +99,10 @@ impl<O, A: Future<Output = O>, B: Future<Output = O>> Future for F<F2<A, B>> {
 }
 
 pub async fn branch_on_result(
-    behavior: impl State,
-    success_state: impl Future<Output = impl State + 'static>,
-    failure_state: impl Future<Output = impl State + 'static>,
-) -> impl State {
+    behavior: impl Behavior,
+    success_state: impl Future<Output = impl Behavior + 'static>,
+    failure_state: impl Future<Output = impl Behavior + 'static>,
+) -> impl Behavior {
     if behavior.await {
         F(F2::A(success_state.await))
     } else {
@@ -125,9 +111,9 @@ pub async fn branch_on_result(
 }
 
 pub async fn check_transition_once(
-    behavior: impl State,
-    next_state: impl Future<Output = impl State>,
-) -> impl State {
+    behavior: impl Behavior,
+    next_state: impl Future<Output = impl Behavior>,
+) -> impl Behavior {
     if behavior.await {
         next_state.await
     } else {
@@ -143,27 +129,27 @@ macro_rules! transition {
 }
 
 #[instrument]
-async fn success() -> impl State {
+async fn success() -> impl Behavior {
     ready(true)
 }
 
 #[instrument]
-async fn failure() -> impl State {
+async fn failure() -> impl Behavior {
     ready(false)
 }
 
 #[instrument]
-async fn state0() -> impl State {
+async fn state0() -> impl Behavior {
     success().await
 }
 
 #[instrument]
-async fn state1() -> impl State {
+async fn state1() -> impl Behavior {
     state0().await
 }
 
 #[instrument]
-async fn state2() -> impl State {
+async fn state2() -> impl Behavior {
     let x = success().await.await;
     select_state!(
         transition!(failure().await.not(), failure()),
@@ -177,28 +163,28 @@ async fn state2() -> impl State {
 }
 
 #[instrument]
-async fn dstate0() -> DynState {
+async fn dstate0() -> DynBehavior {
     state2().dwait()
 }
 
 #[instrument]
-async fn dstate1() -> DynState {
+async fn dstate1() -> DynBehavior {
     dstate1().dwait()
 }
 
 #[instrument]
-async fn dstate2() -> impl State {
+async fn dstate2() -> impl Behavior {
     //state0().await
     dstate3().await
 }
 
 #[instrument]
-async fn dstate3() -> DynState {
+async fn dstate3() -> DynBehavior {
     dstate3().dwait()
 }
 
 #[instrument]
-async fn dstated() -> DynState {
+async fn dstated() -> DynBehavior {
     select_state!(
         transition!(success().await.not(), failure()),
         success(),
@@ -211,12 +197,12 @@ async fn dstated() -> DynState {
 }
 
 #[instrument]
-async fn state_a() -> impl State {
+async fn state_a() -> impl Behavior {
     state_b().await
 }
 
 #[instrument]
-async fn state_b() -> DynState {
+async fn state_b() -> DynBehavior {
     state_a().dwait()
 }
 

@@ -1,3 +1,69 @@
+use core::fmt::Debug;
+use core::future::Future;
+use core::any::Any;
+use alloc::boxed::Box;
+
+#[macro_export]
+macro_rules! any {
+    ($($args:expr),+ $(,)?) => {
+        recursive_try_zip!(true, $($args),+).map(|x|x.is_ok()).not()
+    };
+}
+
+#[macro_export]
+macro_rules! all {
+    ($($args:expr),+ $(,)?) => {
+        recursive_try_zip!(false, $($args),+).map(|x|x.is_ok())
+    };
+}
+
+#[macro_export]
+macro_rules! recursive_try_zip {
+    ($inv:expr, $head:expr) => { async {($head.await ^ $inv).then_some(()).ok_or(()) } };
+    ($inv:expr, $head:expr, $($tail:expr),+  $(,)?) => {
+        future::try_zip(recursive_try_zip!($inv, $head), recursive_try_zip!($inv, $($tail),+))
+    };
+}
+
+#[macro_export]
+macro_rules! repeat_until {
+    ($f:expr, $until:expr $(,)?) => {
+        repeat_until!($f, $until, usize::MAX)
+    };
+    ($f:expr, $until:expr, $n:expr $(,)?) => {
+        async {
+            for _ in 0..$n {
+                if $f.await ^ !$until {
+                    return true;
+                }
+                future::yield_now().await
+            }
+            false
+        }
+    };
+}
+
+pub trait Behavior: Future<Output = bool> {
+    fn as_any(&self) -> &dyn Any where Self: 'static;
+    fn as_box_any(self: Box<Self>) -> Box<dyn Any> where Self: 'static;
+
+    fn not(self) -> impl Future<Output = bool>
+    where
+        Self: Sized,
+    {
+        async { !self.await }
+    }
+}
+
+impl<F: Future<Output = bool>> Behavior for F {
+    fn as_any(&self) -> &dyn Any where Self: 'static {
+        self
+    }
+    fn as_box_any(self: Box<Self>) -> Box<dyn Any> where Self: 'static {
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -11,6 +77,7 @@ mod tests {
 
     use crate::tests::test_init;
     use crate::FutureEx;
+    use crate::Behavior;
 
     #[derive(Debug, Default)]
     pub struct InnerWorldModel {
