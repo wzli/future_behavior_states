@@ -19,7 +19,7 @@ macro_rules! parallel_all {
 
 #[macro_export]
 macro_rules! recursive_try_zip {
-    ($inv:expr, $head:expr) => { async {($head.await ^ $inv).then_some(()).ok_or(()) } };
+    ($inv:expr, $head:expr $(,)?) => { async {($head.await ^ $inv).then_some(()).ok_or(()) } };
     ($inv:expr, $head:expr, $($tail:expr),+  $(,)?) => {
         future::try_zip(recursive_try_zip!($inv, $head), recursive_try_zip!($inv, $($tail),+))
     };
@@ -27,7 +27,7 @@ macro_rules! recursive_try_zip {
 
 #[macro_export]
 macro_rules! reactive_sequence {
-    ($x:expr) => { $x };
+    ($x:expr $(,)?) => { $x };
     ($x:expr, $($rest:expr),+ $(,)?) => {
         async { $x.await && parallel_all!($x, $($rest),+).await }
     };
@@ -35,7 +35,7 @@ macro_rules! reactive_sequence {
 
 #[macro_export]
 macro_rules! reactive_selector {
-    ($x:expr) => { $x };
+    ($x:expr $(,)?) => { $x };
     ($x:expr, $($rest:expr),+ $(,)?) => {
         async { $x.await || parallel_any!($x, $($rest),+).await }
     };
@@ -63,6 +63,7 @@ pub trait Behavior: Future<Output = bool> {
     fn as_any(&self) -> &dyn Any
     where
         Self: 'static;
+
     fn as_box_any(self: Box<Self>) -> Box<dyn Any>
     where
         Self: 'static;
@@ -74,13 +75,16 @@ pub trait Behavior: Future<Output = bool> {
         async { !self.await }
     }
 
-    fn force(self, val: bool) -> impl Future<Output = bool>
+    fn then<B: Behavior>(self, b: B) -> impl Future<Output = B>
     where
         Self: Sized,
     {
-        async move {
-            self.await;
-            val
+        async {
+            if self.await {
+                b
+            } else {
+                future::pending().await
+            }
         }
     }
 }

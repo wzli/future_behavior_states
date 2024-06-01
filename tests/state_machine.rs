@@ -54,6 +54,12 @@ impl Context {
         self.counter.set(x + 1);
         x + 1 >= count
     }
+
+    #[instrument(skip(self))]
+    pub async fn state_sel(self: Rc<Self>) -> impl Behavior {
+        //self.state_0().await
+        select_state!(self.state_0(), self.state_1()).await
+    }
 }
 
 #[test]

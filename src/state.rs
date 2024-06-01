@@ -1,5 +1,3 @@
-use pin_project::pin_project;
-
 use alloc::boxed::Box;
 use core::pin::Pin;
 use core::task::{Context, Poll};
@@ -45,67 +43,15 @@ impl<S: Behavior + Unpin + 'static, F: Future<Output = S>> State for F {
     }
 }
 
-#[macro_export]
-macro_rules! select_state {
-    ($head:expr) => { $head };
-    ($head:expr, $($tail:expr),+ $(,)?) => {
-        select($head, select_state!($($tail),+))
-    };
-}
-
-pub fn select<A: Future, B: Future>(a: A, b: B) -> future::Or<F2<A, B>, F2<A, B>> {
-    future::or(F2::A(a), F2::B(b))
-}
-
-#[pin_project(project = F2Proj)]
-pub enum F2<A, B> {
-    A(#[pin] A),
-    B(#[pin] B),
-}
-
-#[pin_project]
-pub struct F<T>(#[pin] T);
-
-impl<A: Future, B: Future> Future for F2<A, B> {
-    type Output = F<F2<A::Output, B::Output>>;
-    fn poll(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.project() {
-            F2Proj::A(a) => {
-                if let Poll::Ready(x) = a.poll(ctx) {
-                    return Poll::Ready(F(F2::A(x)));
-                }
-            }
-            F2Proj::B(b) => {
-                if let Poll::Ready(x) = b.poll(ctx) {
-                    return Poll::Ready(F(F2::B(x)));
-                }
-            }
-        };
-        Poll::Pending
-    }
-}
-
-impl<O, A: Future<Output = O>, B: Future<Output = O>> Future for F<F2<A, B>> {
-    type Output = O;
-    fn poll(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<O> {
-        {
-            match self.project().0.project() {
-                F2Proj::A(a) => a.poll(ctx),
-                F2Proj::B(b) => b.poll(ctx),
-            }
-        }
-    }
-}
-
 pub async fn branch_on_result(
     behavior: impl Behavior,
     success_state: impl Future<Output = impl Behavior + 'static>,
     failure_state: impl Future<Output = impl Behavior + 'static>,
 ) -> impl Behavior {
     if behavior.await {
-        F(F2::A(success_state.await))
+        Either::A(success_state.await)
     } else {
-        F(F2::B(failure_state.await))
+        Either::B(failure_state.await)
     }
 }
 
