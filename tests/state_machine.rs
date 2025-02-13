@@ -66,6 +66,7 @@ impl Context {
         select!(self.state_0(), self.state_1()).await
     }
 
+    /*
     #[instrument(skip(self))]
     pub async fn state_transitions_parallel(&self) -> bool {
         //self.state_0().await
@@ -76,6 +77,7 @@ impl Context {
         .await
         .await
     }
+    */
 
     #[instrument(skip(self))]
     pub async fn state_transitions(&self) -> bool {

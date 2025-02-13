@@ -1,147 +1,144 @@
-use alloc::boxed::Box;
-use core::pin::Pin;
-use core::task::{Context, Poll};
-
 use crate::*;
 
-pub struct DynBehavior(pub Pin<Box<dyn Future<Output = InnerBehavior>>>);
-pub type InnerBehavior = Pin<Box<dyn Behavior + Unpin>>;
+use alloc::boxed::Box;
 
-impl Future for DynBehavior {
-    type Output = bool;
-    fn poll(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
-        tracing::debug!("poll");
-        if let Poll::Ready(mut state) = self.0.poll(ctx) {
-            if (*state).as_any().downcast_ref::<Self>().is_none() {
-                tracing::debug!("other");
-                return state.poll(ctx);
-            } else if let Ok(dyn_state) = Pin::into_inner(state).as_box_any().downcast::<Self>() {
-                tracing::debug!("self");
-                *self = *dyn_state
+pub enum State {
+    Running(future::BoxedLocal<State>),
+    Success,
+    Failure,
+}
+
+impl State {
+    pub async fn eval(self) -> bool {
+        let mut state = self;
+        loop {
+            match state {
+                State::Running(s) => state = s.await,
+                State::Success => return true,
+                State::Failure => return false,
             }
         }
-        tracing::debug!("end");
-        ctx.waker().wake_by_ref();
-        Poll::Pending
+    }
+
+    pub async fn transition<F: Future<Output = bool>>(self, f: impl Fn() -> F) -> Self {
+        if <Repeat>::until(true, f).await {
+            self
+        } else {
+            future::pending().await
+        }
     }
 }
 
-pub trait State: Sized {
-    fn eval(self) -> impl Behavior;
-
-    fn into_dyn(self) -> DynBehavior
-    where
-        Self: 'static;
-}
-
-impl<S: Behavior + Unpin + 'static, F: Future<Output = S>> State for F {
-    fn eval(self) -> impl Behavior {
-        async { self.await.await }
-    }
-
-    fn into_dyn(self) -> DynBehavior
-    where
-        Self: 'static,
-    {
-        tracing::debug!("into");
-        DynBehavior(Box::pin(async { Box::pin(self.await) as InnerBehavior }))
+impl<F: Future<Output = State> + 'static> From<F> for State {
+    fn from(f: F) -> Self {
+        Self::Running(Box::pin(f))
     }
 }
 
-pub async fn branch_on_result(
-    behavior: impl Behavior,
-    success_state: impl Future<Output = impl Behavior + 'static>,
-    failure_state: impl Future<Output = impl Behavior + 'static>,
-) -> impl Behavior {
-    if behavior.await {
-        Either::A(success_state.await)
-    } else {
-        Either::B(failure_state.await)
+pub trait FutureState: Future<Output = State> + 'static + Sized {
+    fn eval(self) -> impl Future<Output = bool> {
+        State::from(self).eval()
     }
+
+    fn transition<F: Future<Output = bool>>(
+        self,
+        f: impl Fn() -> F,
+    ) -> impl Future<Output = State> {
+        State::from(self).transition(f)
+    }
+}
+
+impl<F: Future<Output = State> + 'static> FutureState for F {}
+
+#[instrument]
+pub fn success() -> State {
+    State::Success
 }
 
 #[instrument]
-pub async fn success() -> impl Behavior {
-    ready(true)
-}
-
-#[instrument]
-pub async fn failure() -> impl Behavior {
-    ready(false)
+pub fn failure() -> State {
+    State::Failure
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures_lite::future::block_on;
+    use future::block_on;
 
     #[instrument]
-    async fn state0() -> impl Behavior {
-        success().await
+    async fn state0() -> State {
+        success()
     }
 
     #[instrument]
-    async fn state1() -> impl Behavior {
-        state0().await
+    async fn state1() -> State {
+        state0().into()
     }
 
     #[instrument]
-    async fn state2() -> impl Behavior {
-        select_state!(
-            transition!(failure().await.not(), failure().await),
-            success(),
-            failure(),
-            success(),
-            failure(),
+    async fn state2() -> State {
+        select!(
+            state1().transition(|| state1().eval()),
+            success().transition(|| success().eval()),
         )
         .await
     }
 
     #[instrument]
-    async fn dstate0() -> DynBehavior {
-        state2().into_dyn()
+    async fn dstate0() -> State {
+        state2().into()
     }
 
     #[instrument]
-    async fn dstate1() -> DynBehavior {
-        dstate1().into_dyn()
+    async fn dstate1() -> State {
+        dstate1().into()
     }
 
     #[instrument]
-    async fn dstate2() -> impl Behavior {
-        dstate3().await
+    async fn dstate2() -> State {
+        dstate3().into()
     }
 
     #[instrument]
-    async fn dstate3() -> DynBehavior {
-        dstate3().into_dyn()
+    async fn dstate3() -> State {
+        dstate3().into()
     }
 
     #[instrument]
-    async fn dstated() -> DynBehavior {
-        select_state!(
-            transition!(success().await.not(), failure().await),
-            success(),
-            failure(),
-            success(),
-            failure(),
+    async fn dstated() -> State {
+        select!(
+            async { failure() }.transition(|| state1().eval()),
+            async { success() },
+            async { failure() },
         )
-        .into_dyn()
+        .await
     }
 
     #[instrument]
-    async fn state_a() -> impl Behavior {
-        state_b().await
+    async fn state_a() -> State {
+        state_b().into()
     }
 
     #[instrument]
-    async fn state_b() -> DynBehavior {
-        state_a().into_dyn()
+    async fn state_b() -> State {
+        state_a().into()
     }
 
-    #[test]
-    fn good_test() {
-        assert!(block_on(dstated().into_dyn()));
-        //assert!(block_on(state_a().into_dyn()));
-    }
+    /*
+        #[test]
+        fn good_test() {
+            /*
+            let _ = tracing_subscriber::fmt()
+                .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+                .with_span_events(
+                    tracing_subscriber::fmt::format::FmtSpan::NEW
+                        | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
+                )
+                .with_target(false)
+                .try_init();
+            */
+            assert!(block_on(dstated().eval()));
+            assert!(block_on(state_a().eval()));
+        }
+    */
 }

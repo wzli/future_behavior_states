@@ -38,38 +38,25 @@ macro_rules! reactive_selector {
     };
 }
 
-#[macro_export]
-macro_rules! repeat_until {
-    ($f:expr, $until:expr $(,)?) => {
-        repeat_until!($f, $until, usize::MAX)
-    };
-    ($f:expr, $until:expr, $n:expr $(,)?) => {
-        async {
-            for _ in 0..$n {
-                if $f.await == $until {
-                    return true;
-                }
-                future::yield_now().await
-            }
-            false
-        }
-    };
-}
+pub struct Repeat<const ATTEMPTS: usize = { usize::MAX }>;
 
-#[macro_export]
-macro_rules! transition {
-    ($f:expr => $s:expr) => {
-        repeat_until!($f, true).then($s)
-    };
-    ($f:expr, $s:expr $(,)?) => {
-        transition!($f => $s)
+impl<const ATTEMPTS: usize> Repeat<ATTEMPTS> {
+    pub async fn until<O: PartialEq, F: Future<Output = O>>(o: O, f: impl Fn() -> F) -> bool {
+        for _ in 0..ATTEMPTS {
+            if f().await == o {
+                return true;
+            }
+            future::yield_now().await
+        }
+        false
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures_lite::future::block_on;
+    use core::cell::Cell;
+    use future::block_on;
 
     #[test]
     fn parallel_any_macro() {
@@ -117,21 +104,21 @@ mod tests {
 
     #[test]
     fn run_until_macro() {
-        async fn count_down(x: &mut u8) -> bool {
-            if *x == 0 {
+        async fn count_down(x: &Cell<u8>) -> bool {
+            if x.get() == 0 {
                 true
             } else {
-                *x -= 1;
+                x.set(x.get() - 1);
                 false
             }
         }
 
-        let mut x = 3;
-        assert!(block_on(repeat_until!(count_down(&mut x), true)));
-        x = 3;
-        assert!(block_on(repeat_until!(count_down(&mut x), true, 4)));
-        x = 3;
-        assert!(!block_on(repeat_until!(count_down(&mut x), true, 3)));
-        assert_eq!(x, 0);
+        let x = Cell::new(3);
+        assert!(block_on(<Repeat>::until(true, || count_down(&x))));
+        x.set(3);
+        assert!(block_on(Repeat::<4>::until(true, || count_down(&x))));
+        x.set(3);
+        assert!(!block_on(Repeat::<3>::until(true, || count_down(&x))));
+        assert_eq!(x.get(), 0);
     }
 }
