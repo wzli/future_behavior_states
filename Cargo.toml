@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-futures-lite = { version = "2.3", default-features = false }
+futures-lite = { version = "2.3", default-features = false, features = ["alloc"]}
 pin-project = "1.1"
 tracing = { version = "0.1", default-features = false, features = ["attributes", "async-await"] }
 

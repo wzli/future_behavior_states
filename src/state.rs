@@ -4,19 +4,23 @@ use core::task::{Context, Poll};
 
 use crate::*;
 
-pub struct DynBehavior(Pin<Box<dyn Future<Output = InnerBehavior>>>);
-type InnerBehavior = Pin<Box<dyn Behavior + Unpin>>;
+pub struct DynBehavior(pub Pin<Box<dyn Future<Output = InnerBehavior>>>);
+pub type InnerBehavior = Pin<Box<dyn Behavior + Unpin>>;
 
 impl Future for DynBehavior {
     type Output = bool;
     fn poll(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
+        tracing::debug!("poll");
         if let Poll::Ready(mut state) = self.0.poll(ctx) {
             if (*state).as_any().downcast_ref::<Self>().is_none() {
+                tracing::debug!("other");
                 return state.poll(ctx);
             } else if let Ok(dyn_state) = Pin::into_inner(state).as_box_any().downcast::<Self>() {
+                tracing::debug!("self");
                 *self = *dyn_state
             }
         }
+        tracing::debug!("end");
         ctx.waker().wake_by_ref();
         Poll::Pending
     }
@@ -39,6 +43,7 @@ impl<S: Behavior + Unpin + 'static, F: Future<Output = S>> State for F {
     where
         Self: 'static,
     {
+        tracing::debug!("into");
         DynBehavior(Box::pin(async { Box::pin(self.await) as InnerBehavior }))
     }
 }
@@ -53,24 +58,6 @@ pub async fn branch_on_result(
     } else {
         Either::B(failure_state.await)
     }
-}
-
-pub async fn check_transition_once(
-    behavior: impl Behavior,
-    next_state: impl Future<Output = impl Behavior>,
-) -> impl Behavior {
-    if behavior.await {
-        next_state.await
-    } else {
-        future::pending().await
-    }
-}
-
-#[macro_export]
-macro_rules! transition {
-    ($f:expr, $s:expr $(,)?) => {
-        check_transition_once(repeat_until!($f, true), $s)
-    };
 }
 
 #[instrument]
@@ -101,12 +88,11 @@ mod tests {
     #[instrument]
     async fn state2() -> impl Behavior {
         select_state!(
-            transition!(failure().await.not(), failure()),
+            transition!(failure().await.not(), failure().await),
             success(),
             failure(),
             success(),
             failure(),
-            //transition(success().await, success(), failure())
         )
         .await
     }
@@ -123,7 +109,6 @@ mod tests {
 
     #[instrument]
     async fn dstate2() -> impl Behavior {
-        //state0().await
         dstate3().await
     }
 
@@ -135,12 +120,11 @@ mod tests {
     #[instrument]
     async fn dstated() -> DynBehavior {
         select_state!(
-            transition!(success().await.not(), failure()),
+            transition!(success().await.not(), failure().await),
             success(),
             failure(),
             success(),
             failure(),
-            //transition(success().await, success(), failure()),
         )
         .into_dyn()
     }
@@ -158,5 +142,6 @@ mod tests {
     #[test]
     fn good_test() {
         assert!(block_on(dstated().into_dyn()));
+        //assert!(block_on(state_a().into_dyn()));
     }
 }

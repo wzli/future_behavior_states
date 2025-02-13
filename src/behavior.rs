@@ -1,6 +1,3 @@
-use alloc::boxed::Box;
-use core::any::Any;
-
 use crate::*;
 
 #[macro_export]
@@ -49,7 +46,7 @@ macro_rules! repeat_until {
     ($f:expr, $until:expr, $n:expr $(,)?) => {
         async {
             for _ in 0..$n {
-                if $f.await ^ !$until {
+                if $f.await == $until {
                     return true;
                 }
                 future::yield_now().await
@@ -59,48 +56,13 @@ macro_rules! repeat_until {
     };
 }
 
-pub trait Behavior: Future<Output = bool> {
-    fn as_any(&self) -> &dyn Any
-    where
-        Self: 'static;
-
-    fn as_box_any(self: Box<Self>) -> Box<dyn Any>
-    where
-        Self: 'static;
-
-    fn not(self) -> impl Future<Output = bool>
-    where
-        Self: Sized,
-    {
-        async { !self.await }
-    }
-
-    fn then<B: Behavior>(self, b: B) -> impl Future<Output = B>
-    where
-        Self: Sized,
-    {
-        async {
-            if self.await {
-                b
-            } else {
-                future::pending().await
-            }
-        }
-    }
-}
-
-impl<F: Future<Output = bool>> Behavior for F {
-    fn as_any(&self) -> &dyn Any
-    where
-        Self: 'static,
-    {
-        self
-    }
-    fn as_box_any(self: Box<Self>) -> Box<dyn Any>
-    where
-        Self: 'static,
-    {
-        self
+#[macro_export]
+macro_rules! transition {
+    ($f:expr => $s:expr) => {
+        repeat_until!($f, true).then($s)
+    };
+    ($f:expr, $s:expr $(,)?) => {
+        transition!($f => $s)
     }
 }
 
@@ -163,6 +125,7 @@ mod tests {
                 false
             }
         }
+
         let mut x = 3;
         assert!(block_on(repeat_until!(count_down(&mut x), true)));
         x = 3;
