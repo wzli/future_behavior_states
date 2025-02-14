@@ -48,3 +48,44 @@ impl<F: Future> FutureEx for F {}
 
 mod behavior;
 mod state;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use future::block_on;
+
+    #[test]
+    fn join_macro() {
+        let x = block_on(join!(ready(true), ready(false), ready(true), ready(false)));
+        assert_eq!(x, (true, (false, (true, false))));
+    }
+
+    #[test]
+    fn select_macro() {
+        let x = block_on(select!(
+            future::pending(),
+            future::pending(),
+            future::pending(),
+            ready(true)
+        ));
+        assert!(x);
+    }
+
+    #[test]
+    fn map_trait() {
+        let x = block_on(ready(5).map(|x| x * 2));
+        assert_eq!(x, 10);
+    }
+
+    #[test]
+    fn force_trait() {
+        let x = block_on(ready(5).force(true));
+        assert!(x);
+    }
+
+    #[test]
+    fn not_trait() {
+        let x = block_on(ready(false).not());
+        assert!(x);
+    }
+}
