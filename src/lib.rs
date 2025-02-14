@@ -13,17 +13,18 @@ pub use state::*;
 #[macro_export]
 macro_rules! join {
     ($head:expr) => { $head };
-    ($head:expr, $($tail:expr),+ $(,)?) => {
-        future::zip($head, join!($($tail),+))
-    };
+    ($head:expr, $($tail:expr),+ $(,)?) => { future::zip($head, join!($($tail),+)) };
 }
 
 #[macro_export]
 macro_rules! select {
     ($head:expr) => { $head };
-    ($head:expr, $($tail:expr),+ $(,)?) => {
-        future::or($head, select!($($tail),+))
-    };
+    ($head:expr, $($tail:expr),+ $(,)?) => { future::or($head, select!($($tail),+)) };
+}
+
+#[macro_export]
+macro_rules! on_exit {
+    ($($t:tt)*) => { let _on_exit = $crate::OnExit(Some(|| { $($t)* })); };
 }
 
 // Future trait extensions
@@ -46,13 +47,23 @@ pub trait FutureEx: Future + Sized {
 
 impl<F: Future> FutureEx for F {}
 
+pub struct OnExit<F: FnOnce()>(Option<F>);
+
+impl<F: FnOnce()> Drop for OnExit<F> {
+    fn drop(&mut self) {
+        if let Some(f) = self.0.take() {
+            f();
+        }
+    }
+}
+
 mod behavior;
 mod state;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use future::block_on;
+    use future::{block_on, poll_once};
 
     #[test]
     fn join_macro() {
@@ -87,5 +98,16 @@ mod tests {
     fn not_trait() {
         let x = block_on(ready(false).not());
         assert!(x);
+    }
+
+    #[test]
+    #[should_panic(expected = "successful exit")]
+    fn async_on_exit() {
+        async fn test_func() {
+            on_exit! { panic!("successful exit") };
+            future::yield_now().await;
+        }
+        let f = test_func();
+        assert!(block_on(poll_once(f)).is_none());
     }
 }
