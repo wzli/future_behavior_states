@@ -38,18 +38,21 @@ macro_rules! reactive_selector {
     };
 }
 
-pub struct Repeat<const ATTEMPTS: usize = { usize::MAX }>;
-
-impl<const ATTEMPTS: usize> Repeat<ATTEMPTS> {
-    pub async fn until<O: PartialEq, F: Future<Output = O>>(o: O, f: impl Fn() -> F) -> bool {
-        for _ in 0..ATTEMPTS {
-            if f().await == o {
+pub async fn repeat_until<O: PartialEq, F: Future<Output = O>>(
+    attempts: usize,
+    value: Option<O>,
+    f: impl Fn() -> F,
+) -> bool {
+    for _ in 0..attempts {
+        let res = f().await;
+        if let Some(val) = &value {
+            if res == *val {
                 return true;
             }
-            future::yield_now().await
         }
-        false
+        future::yield_now().await
     }
+    false
 }
 
 #[cfg(test)]
@@ -114,11 +117,11 @@ mod tests {
         }
 
         let x = Cell::new(3);
-        assert!(block_on(<Repeat>::until(true, || count_down(&x))));
+        assert!(block_on(repeat_until(100, Some(true), || count_down(&x))));
         x.set(3);
-        assert!(block_on(Repeat::<4>::until(true, || count_down(&x))));
+        assert!(block_on(repeat_until(4, Some(true), || count_down(&x))));
         x.set(3);
-        assert!(!block_on(Repeat::<3>::until(true, || count_down(&x))));
+        assert!(!block_on(repeat_until(3, Some(true), || count_down(&x))));
         assert_eq!(x.get(), 0);
     }
 }

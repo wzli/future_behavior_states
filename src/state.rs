@@ -8,26 +8,13 @@ pub enum State {
     Failure,
 }
 
-impl State {
-    pub async fn eval(self) -> bool {
-        let mut state = self;
-        loop {
-            match state {
-                State::Running(s) => state = s.await,
-                State::Success => return true,
-                State::Failure => return false,
-            }
-        }
-    }
-
-    pub async fn transition<F: Future<Output = bool>>(self, f: impl Fn() -> F) -> Self {
-        if <Repeat>::until(true, f).await {
-            self
-        } else {
-            future::pending().await
-        }
+/*
+impl<FB: Future<Output = bool>, FS: Future<Output = State>> From<FB> for FS {
+    fn from(b: FS) -> FS {
+        b.map(State::Success)
     }
 }
+*/
 
 impl<F: Future<Output = State> + 'static> From<F> for State {
     fn from(f: F) -> Self {
@@ -37,26 +24,56 @@ impl<F: Future<Output = State> + 'static> From<F> for State {
 
 pub trait FutureState: Future<Output = State> + 'static + Sized {
     fn eval(self) -> impl Future<Output = bool> {
-        State::from(self).eval()
+        async {
+            let mut state = self.await;
+            loop {
+                match state {
+                    State::Running(s) => state = s.await,
+                    State::Success => return true,
+                    State::Failure => return false,
+                }
+            }
+        }
     }
 
-    fn transition<F: Future<Output = bool>>(
-        self,
-        f: impl Fn() -> F,
-    ) -> impl Future<Output = State> {
-        State::from(self).transition(f)
+    fn when<F: Future<Output = bool>>(self, f: impl Fn() -> F) -> impl Future<Output = State> {
+        async move {
+            loop {
+                if f().await {
+                    return self.into();
+                }
+                future::yield_now().await
+            }
+        }
     }
 }
 
 impl<F: Future<Output = State> + 'static> FutureState for F {}
 
+pub async fn result_when<F: Future<Output = bool>>(
+    return_success: bool,
+    return_failure: bool,
+    f: impl Fn() -> F,
+) -> State {
+    loop {
+        if f().await {
+            if return_success {
+                return State::Success;
+            }
+        } else if return_failure {
+            return State::Failure;
+        }
+        future::yield_now().await
+    }
+}
+
 #[instrument]
-pub fn success() -> State {
+pub async fn success() -> State {
     State::Success
 }
 
 #[instrument]
-pub fn failure() -> State {
+pub async fn failure() -> State {
     State::Failure
 }
 
@@ -67,7 +84,7 @@ mod tests {
 
     #[instrument]
     async fn state0() -> State {
-        success()
+        success().into()
     }
 
     #[instrument]
@@ -78,10 +95,11 @@ mod tests {
     #[instrument]
     async fn state2() -> State {
         select!(
-            state1().transition(|| state1().eval()),
-            success().transition(|| success().eval()),
+            state1().when(|| state1().eval()),
+            success().when(|| success().eval()),
+            result_when(false, false, || state1().eval()),
         )
-        .await
+        .into()
     }
 
     #[instrument]
@@ -106,12 +124,7 @@ mod tests {
 
     #[instrument]
     async fn dstated() -> State {
-        select!(
-            async { failure() }.transition(|| state1().eval()),
-            async { success() },
-            async { failure() },
-        )
-        .await
+        select!(failure().when(|| state1().eval()), success(), failure(),).into()
     }
 
     #[instrument]
