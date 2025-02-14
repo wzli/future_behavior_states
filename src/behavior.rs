@@ -2,16 +2,12 @@ use crate::*;
 
 #[macro_export]
 macro_rules! parallel_any {
-    ($($args:expr),+ $(,)?) => {
-        recursive_try_zip!(true, $($args),+).map(|x|x.is_ok()).not()
-    };
+    ($($args:expr),+ $(,)?) => { recursive_try_zip!(true, $($args),+).map(|x|x.is_ok()).not() };
 }
 
 #[macro_export]
 macro_rules! parallel_all {
-    ($($args:expr),+ $(,)?) => {
-        recursive_try_zip!(false, $($args),+).map(|x|x.is_ok())
-    };
+    ($($args:expr),+ $(,)?) => { recursive_try_zip!(false, $($args),+).map(|x|x.is_ok()) };
 }
 
 #[macro_export]
@@ -26,7 +22,10 @@ macro_rules! recursive_try_zip {
 macro_rules! reactive_sequence {
     ($x:expr $(,)?) => { $x };
     ($x:expr, $($rest:expr),+ $(,)?) => {
-        async { $x.await && parallel_all!($x, $($rest),+).await }
+        async { $x.await && future::or(
+                repeat_until(usize::MAX, Some(false), || $x).not(),
+                reactive_sequence!($($rest),+),
+        ).await }
     };
 }
 
@@ -34,7 +33,10 @@ macro_rules! reactive_sequence {
 macro_rules! reactive_selector {
     ($x:expr $(,)?) => { $x };
     ($x:expr, $($rest:expr),+ $(,)?) => {
-        async { $x.await || parallel_any!($x, $($rest),+).await }
+        async { $x.await || future::or(
+                repeat_until(usize::MAX, Some(true), || $x),
+                reactive_selector!($($rest),+),
+        ).await }
     };
 }
 
