@@ -19,38 +19,32 @@ struct Context {
 
 impl Context {
     #[instrument(skip(self))]
-    pub async fn state_0(&self) -> bool {
-        true
+    pub async fn state_0(self: Rc<Self>) -> State {
+        success().into()
     }
 
     #[instrument(skip(self))]
-    pub async fn state_1(&self) -> bool {
-        self.state_0().await
+    pub async fn state_1(self: Rc<Self>) -> State {
+        self.state_0().into()
     }
 
     #[instrument(skip(self))]
-    pub async fn state_2(self: Rc<Self>) -> bool {
-        self.state_1().await
+    pub async fn state_2(self: Rc<Self>) -> State {
+        self.state_1().into()
     }
 
     #[instrument(skip(self))]
-    pub async fn state_3(self: Rc<Self>) -> bool {
+    pub async fn state_3(self: Rc<Self>) -> State {
         if self.clone().count_upto(10).await {
-            self.clone().state_0().await
+            self.state_0().into()
         } else {
-            self.clone().state_2().await
+            self.state_2().into()
         }
-        /*
-        self.clone().count_upto(10).branch(
-            self.clone().state_0(),
-            self.clone().state_2(),
-        ).await.await
-        */
     }
 
     #[instrument(skip(self))]
-    pub async fn state_4(self: Rc<Self>) -> bool {
-        self.clone().state_3().await
+    pub async fn state_4(self: Rc<Self>) -> State {
+        self.state_3().into()
     }
 
     #[instrument(ret)]
@@ -61,43 +55,87 @@ impl Context {
     }
 
     #[instrument(skip(self))]
-    pub async fn state_sel(self: Rc<Self>) -> bool {
-        //self.state_0().await
-        select!(self.state_0(), self.state_1()).await
-    }
-
-    /*
-    #[instrument(skip(self))]
-    pub async fn state_transitions_parallel(&self) -> bool {
-        //self.state_0().await
-        select_state!(
-            transition!(self.state_0() => self.state_1()),
-            transition!(self.state_1() => self.state_0()),
-        )
-        .await
-        .await
-    }
-    */
-
-    #[instrument(skip(self))]
-    pub async fn state_transitions(&self) -> bool {
+    pub async fn state_transitions_0(self: Rc<Self>) -> State {
         loop {
-            if self.state_0().await {
-                return self.state_0().await;
-            } else if self.state_0().await {
-                return self.state_1().await;
+            if ready(false).await {
+                return failure().into();
+            } else if ready(true).await {
+                return self.state_transitions_1().into();
             }
             future::yield_now().await
         }
     }
+
+    #[instrument(skip(self))]
+    pub async fn state_transitions_1(self: Rc<Self>) -> State {
+        loop {
+            if ready(false).await {
+                return failure().into();
+            } else if ready(true).await {
+                return self.state_transitions_2().into();
+            }
+            future::yield_now().await
+        }
+    }
+
+    #[instrument(skip(self))]
+    pub async fn state_transitions_2(self: Rc<Self>) -> State {
+        loop {
+            if ready(false).await {
+                return failure().into();
+            } else if ready(true).await {
+                return success().into();
+            }
+            future::yield_now().await
+        }
+    }
+
+    #[instrument(skip(self))]
+    pub async fn state_transitions_parallel_0(self: Rc<Self>) -> State {
+        select!(
+            failure().when(|| ready(false)),
+            self.state_transitions_parallel_1().when(|| ready(true)),
+        )
+        .into()
+    }
+
+    #[instrument(skip(self))]
+    pub async fn state_transitions_parallel_1(self: Rc<Self>) -> State {
+        select!(
+            failure().when(|| ready(false)),
+            self.state_transitions_parallel_2().when(|| ready(true)),
+        )
+        .into()
+    }
+
+    #[instrument(skip(self))]
+    pub async fn state_transitions_parallel_2(self: Rc<Self>) -> State {
+        select!(
+            failure().when(|| ready(false)),
+            success().when(|| ready(true)),
+        )
+        .into()
+    }
 }
 
 #[test]
-fn state_machine_tests() {
+fn state_machine_chain() {
     test_init();
-
     let ctx = Rc::new(Context::default());
-
-    assert!(block_on(ctx.clone().state_4()));
+    assert!(block_on(ctx.clone().state_4().eval()));
     tracing::debug!(?ctx);
+}
+
+#[test]
+fn state_machine_transitions() {
+    test_init();
+    let ctx = Rc::new(Context::default());
+    assert!(block_on(ctx.clone().state_transitions_0().eval()));
+}
+
+#[test]
+fn state_machine_transitions_parallel() {
+    test_init();
+    let ctx = Rc::new(Context::default());
+    assert!(block_on(ctx.clone().state_transitions_parallel_0().eval()));
 }
