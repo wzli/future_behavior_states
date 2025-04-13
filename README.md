@@ -84,6 +84,6 @@ This enables seamless coexistence and interchangeability between both paradigms 
 
 ## Example Usage
 
-- For behavior tree examples, refer to: [Behavior Tree](test/behavior_tree.rs)
-- For state machine examples, refer to: [State Machine](test/state_machine.rs)
+- For behavior tree examples, refer to: [Behavior Tree](tests/behavior_tree.rs)
+- For state machine examples, refer to: [State Machine](tests/state_machine.rs)
 
