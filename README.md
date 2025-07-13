@@ -70,7 +70,7 @@ States:
 | From       | To         | Mechanism |
 |------------|------------|-----------|
 | State      | Behavior   | Execute state until terminal transition returns success/failure (e.g., `state.eval()`).|
-| Behavior   | State Transition     | Treat behavior as a decision rule (e.g., `next_state.when(|| check_behavior())`). |
+| Behavior   | State Transition     | Treat behavior as a decision rule (e.g., `next_state.when(\|\| check_behavior())`). |
 | Behavior   | State Internal Action | Use behavior result as transition to Success/Failure, or discard result and repeat for non terminating states. |
 
 ### 4. Hierarchical Composition
